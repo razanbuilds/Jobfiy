@@ -169,10 +169,9 @@ def save_to_sqlite(jobs):
                  salary, skills, experience_level, apply_link, posted_at, fetched_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                job.get("source"), job.get("job_title"), job.get("company"),
-                job.get("city"), job.get("location"), job.get("employment_type"),
-                job.get("salary"), job.get("skills"), job.get("experience_level"),
-                job.get("apply_link"), job.get("posted_at"), fetched_at,
+                job.get("source"), job.get("job_title"), job.get("company"),job.get("city"),
+                job.get("location"),job.get("employment_type"),job.get("salary"),
+                job.get("skills"),job.get("experience_level"), job.get("apply_link"), job.get("posted_at"), fetched_at,
             ))
             if cur.rowcount:
                 inserted += 1
@@ -186,7 +185,31 @@ def save_to_sqlite(jobs):
 # ==========================================
 # 5. Save results to JSON
 # ==========================================
-def save_to_json(jobs):
+def save_to_json():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute("""
+        SELECT
+            source,
+            job_title,
+            company,
+            city,
+            location,
+            employment_type,
+            salary,
+            skills,
+            experience_level,
+            apply_link,
+            posted_at,
+            fetched_at
+        FROM jobs
+    """).fetchall()
+
+    conn.close()
+
+    jobs = [dict(row) for row in rows]
+
     with open(JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(jobs, f, ensure_ascii=False, indent=2)
 
@@ -202,7 +225,7 @@ def main():
         print("\n❌ No results found. Check your API keys in the .env file.")
         return
 
-    save_to_json(all_jobs)
+    save_to_json()
     inserted = save_to_sqlite(all_jobs)
 
     print("\n" + "=" * 50)
