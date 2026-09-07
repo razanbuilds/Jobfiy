@@ -14,7 +14,6 @@ DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 load_dotenv(dotenv_path=BASE_DIR / ".env")
-
 RAPID_KEY = os.getenv("RAPIDAPI_KEY")
 RAPID_HOST = os.getenv("RAPIDAPI_HOST", "jsearch.p.rapidapi.com")
 JOOBLE_KEY = os.getenv("JOOBLE_KEY")
@@ -33,7 +32,7 @@ def fetch_jsearch():
         return
 
     print("⏳ Fetching jobs from JSearch...")
-    url = "https://jsearch.p.rapidapi.com/search"
+    url = "https://jsearch.p.rapidapi.com/search-v2"
     headers = {
         "x-rapidapi-key": RAPID_KEY.strip(),
         "x-rapidapi-host": RAPID_HOST.strip(),
@@ -48,8 +47,8 @@ def fetch_jsearch():
         if res.status_code != 200:
             print(f"⚠️  JSearch failed (status {res.status_code}): {res.text}")
             return
-
-        data = res.json().get("data", [])
+  
+        data = res.json().get("data", {}).get("jobs", [])
         for job in data:
             min_salary = job.get("job_min_salary")
             max_salary = job.get("job_max_salary")
@@ -62,9 +61,17 @@ def fetch_jsearch():
             )
 
             skills_list = job.get("job_required_skills")
-            skills = ", ".join(skills_list) if skills_list else "N/A"
-
-            exp = job.get("job_required_experience") or {}
+            if isinstance(skills_list, list):
+             skills = ", ".join(skills_list)
+            elif skills_list:
+             skills = str(skills_list)
+            else:
+             skills = "N/A"
+             
+            exp = job.get("job_required_experience") 
+            if not isinstance(exp, dict):
+                exp = {}
+                
             if exp.get("no_experience_required"):
                 experience_level = "No experience required"
             elif exp.get("required_experience_in_months"):
@@ -88,6 +95,7 @@ def fetch_jsearch():
                 "posted_at": job.get("job_posted_at_datetime_utc"),
             })
         print(f"✔️  Fetched {len(data)} jobs from JSearch.")
+   
     except Exception as e:
         print(f"❌ Error connecting to JSearch: {e}")
 
@@ -101,16 +109,15 @@ def fetch_jooble():
         return
 
     print("⏳ Fetching jobs from Jooble...")
-    url = f"https://jooble.org/api/{JOOBLE_KEY.strip()}"
+    url = f"https://sa.jooble.org/api/{JOOBLE_KEY.strip()}"
     payload = {"keywords": "Software Quality Assurance", "location": "Saudi Arabia"}
     try:
         res = requests.post(url, json=payload, timeout=30)
         if res.status_code != 200:
             print(f"⚠️  Jooble failed (status {res.status_code}): {res.text}")
             return
-
-        jobs = res.json().get("jobs", [])
-        for job in jobs:
+        data = res.json().get("data", {}).get("jobs", [])
+        for job in data:
             all_jobs.append({
                 "source": "Jooble",
                 "job_title": job.get("title"),
@@ -124,7 +131,7 @@ def fetch_jooble():
                 "apply_link": job.get("link"),
                 "posted_at": job.get("updated"),
             })
-        print(f"✔️  Fetched {len(jobs)} jobs from Jooble.")
+        print(f"✔️  Fetched {len(data)} jobs from Jooble.")
     except Exception as e:
         print(f"❌ Error connecting to Jooble: {e}")
 
