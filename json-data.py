@@ -1,44 +1,287 @@
 import pandas as pd
 import json
+import re
+import spacy
+
+# =========================
+# Load data
+# =========================
 
 with open("data/jobs_results.json", "r", encoding="utf-8") as f:
     raw = json.load(f)
 
-# check the structure first
 print(type(raw))
+
 if isinstance(raw, dict):
     print(raw.keys())
-    
+
 df = pd.DataFrame(raw)
 
-import spacy
-from spacy.matcher import PhraseMatcher
 
-# Add near the top with your other constants
+# =========================
+# Common skills
+# =========================
+
 COMMON_SKILLS = [
-    "Python", "Java", "JavaScript", "SQL", "Excel", "React", "Node.js",
-    "AWS", "Azure", "Docker", "Kubernetes", "Selenium", "Jira", "Agile",
-    "Scrum", "Git", "C++", "C#", "Power BI", "Tableau", "REST API",
-    "Machine Learning", "Data Analysis", "QA Testing", "Automation Testing",
-    "Manual Testing", "TestNG", "JUnit", "Postman", "Linux", "Cloud Computing"
-    # add whatever's relevant to the roles you're scraping (QA/Data roles it looks like)
+    # Programming Languages
+    "Python", "Java", "JavaScript", "TypeScript",
+    "C", "C++", "C#", "Go", "PHP", "Ruby",
+    "Scala", "Kotlin", "Swift",
+
+    # Databases
+    "SQL", "MySQL", "PostgreSQL", "Oracle",
+    "SQL Server", "MongoDB", "Redis",
+    "Database", "Database Management",
+
+    # Data Engineering
+    "Data Engineering", "Data Analysis",
+    "Data Pipeline", "ETL", "ELT",
+    "Apache Airflow", "Airflow",
+    "Apache Spark", "Spark",
+    "Kafka", "Apache Kafka",
+    "dbt", "Snowflake",
+    "Databricks", "Hadoop",
+    "Data Warehouse", "Data Lake",
+    "Data Modeling", "Data Quality",
+    "Data Integration",
+
+    # Cloud
+    "AWS", "Amazon Web Services",
+    "Azure", "Microsoft Azure",
+    "Google Cloud", "GCP",
+    "Cloud Computing",
+    "EC2", "S3", "Lambda",
+    "Azure Data Factory",
+
+    # DevOps / Tools
+    "Docker", "Kubernetes",
+    "Git", "GitHub", "GitLab",
+    "CI/CD", "Jenkins",
+    "Linux", "Bash",
+    "Terraform",
+
+    # APIs / Web
+    "REST API", "REST APIs",
+    "API", "API Testing",
+    "Postman",
+    "JSON", "XML",
+    "FastAPI", "Flask", "Django",
+
+   # Testing & QA
+    "QA", "Quality Assurance",
+    "Quality Control",
+    "QA Testing",
+    "Manual Testing",
+    "Automation Testing",
+    "Automated Testing",
+    "Automated Tests",
+    "Software Testing",
+    "Regression Testing",
+    "Test Cases",
+    "Test Case Design",
+    "Test Plans",
+    "TestNG", "JUnit",
+    "Selenium", "Cypress",
+    "Playwright",
+    "Jira",
+    "Bug Tracking",
+    "Defect Management",
+    "Performance Testing",
+    "Integration Testing",
+    "Unit Testing",
+
+    # Software Development
+    "Software Development",
+    "Software Engineering",
+    "Object-Oriented Programming",
+    "OOP",
+    "Microservices",
+    "Agile",
+    "Scrum",
+    "SDLC",
+
+    # Frontend
+    "HTML", "CSS",
+    "React", "Angular", "Vue.js",
+    "Node.js",
+
+    # BI / Analytics
+    "Excel",
+    "Power BI",
+    "Tableau",
+    "Data Visualization",
+    "Business Intelligence",
+    "Data Analytics",
+
+    # AI / ML
+    "Machine Learning",
+    "Deep Learning",
+    "Artificial Intelligence",
+    "NLP",
+    "Natural Language Processing",
+    "scikit-learn",
+    "TensorFlow",
+    "PyTorch",
+
+    # Other
+    "Problem Solving",
+    "Technical Documentation",
+    "Requirements Analysis",
 ]
 
-import re
+
+# =========================
+# Extract skills from text
+# =========================
 
 def extract_skills_from_text(text):
     if not text:
-        return "N/A"
-    text_lower = text.lower()
-    found = [skill for skill in COMMON_SKILLS 
-             if re.search(r'\b' + re.escape(skill.lower()) + r'\b', text_lower)]
-    return ", ".join(found) if found else "N/A"
+        return []
+
+    text_lower = str(text).lower()
+
+    found = []
+
+    for skill in COMMON_SKILLS:
+        pattern = r"\b" + re.escape(skill.lower()) + r"\b"
+
+        if re.search(pattern, text_lower):
+            found.append(skill)
+
+    return found
+
+
+# =========================
+# Combine original + extracted skills
+# =========================
+
+def normalize_skills(value):
+    """
+    Convert skills from different formats into a list.
+    """
+
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return [str(skill).strip() for skill in value if str(skill).strip()]
+
+    if isinstance(value, str):
+        value = value.strip()
+
+        if not value or value.upper() == "N/A":
+            return []
+
+        # Try JSON list if stored as a string
+        try:
+            parsed = json.loads(value)
+
+            if isinstance(parsed, list):
+                return [
+                    str(skill).strip()
+                    for skill in parsed
+                    if str(skill).strip()
+                ]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Otherwise split common separators
+        return [
+            skill.strip()
+            for skill in re.split(r",|;|\|", value)
+            if skill.strip()
+        ]
+
+    return []
+
+
+def combine_skills(original_skills, extracted_skills):
+    """
+    Combine source skills and extracted skills
+    while removing duplicates.
+    """
+
+    original = normalize_skills(original_skills)
+    extracted = normalize_skills(extracted_skills)
+
+    combined = []
+    seen = set()
+
+    for skill in original + extracted:
+        key = skill.lower().strip()
+
+        if key and key not in seen:
+            combined.append(skill.strip())
+            seen.add(key)
+
+    return ", ".join(combined) if combined else "N/A"
+
+
+# =========================
+# Build combined text
+# =========================
 
 df["combined_text"] = (
-    df["job_title"].fillna("") + " " +
-    df["employment_type"].fillna("") + " " +
-    df["experience_level"].fillna("")
+    df["job_title"].fillna("").astype(str) + " " +
+    df["description"].fillna("").astype(str) + " " +
+    df["employment_type"].fillna("").astype(str) + " " +
+    df["experience_level"].fillna("").astype(str)
 )
-df["extracted_skills"] = df["combined_text"].apply(extract_skills_from_text)
-print(df[["job_title", "extracted_skills"]])
 
+
+# =========================
+# Extract skills
+# =========================
+
+df["extracted_skills"] = df["combined_text"].apply(
+    extract_skills_from_text
+)
+
+
+# =========================
+# Combine original skills
+# with extracted skills
+# =========================
+
+df["final_skills"] = df.apply(
+    lambda row: combine_skills(
+        row["skills"],
+        row["extracted_skills"]
+    ),
+    axis=1
+)
+
+
+# =========================
+# Display results
+# =========================
+
+print("\n===== RESULTS =====\n")
+
+print(
+    df[
+        [
+            "job_title",
+            "skills",
+            "extracted_skills",
+            "final_skills"
+        ]
+    ].to_string(index=False)
+)
+
+
+# =========================
+# Save enriched data
+# =========================
+
+output_file = "data/jobs_results_enriched.json"
+
+df.to_json(
+    output_file,
+    orient="records",
+    force_ascii=False,
+    indent=2
+)
+
+
+print(f"\nEnriched data saved to: {output_file}")
