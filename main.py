@@ -155,7 +155,7 @@ def fetch_jooble():
         return
 
     print("⏳ Fetching jobs from Jooble...")
-    url = f"https://sa.jooble.org/api/{JOOBLE_KEY.strip()}"
+    url = f"https://jooble.org/api/{JOOBLE_KEY.strip()}"
     payload = {"keywords": "Software Quality Assurance", "location": "Saudi Arabia"}
     try:
         res = requests.post(url, json=payload, timeout=30)

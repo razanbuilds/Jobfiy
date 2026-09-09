@@ -1,7 +1,8 @@
-import pandas as pd
 import json
 import re
+import pandas as pd
 import spacy
+from spacy.matcher import PhraseMatcher
 
 # =========================
 # Load data
@@ -11,16 +12,14 @@ with open("data/jobs_results.json", "r", encoding="utf-8") as f:
     raw = json.load(f)
 
 print(type(raw))
-
 if isinstance(raw, dict):
     print(raw.keys())
 
 df = pd.DataFrame(raw)
 
-
-# =========================
-# Common skills
-# =========================
+# ==========================================
+# Common skills (القائمة الشاملة)
+# ==========================================
 
 COMMON_SKILLS = [
     # Programming Languages
@@ -67,7 +66,7 @@ COMMON_SKILLS = [
     "JSON", "XML",
     "FastAPI", "Flask", "Django",
 
-   # Testing & QA
+    # Testing & QA
     "QA", "Quality Assurance",
     "Quality Control",
     "QA Testing",
@@ -129,159 +128,78 @@ COMMON_SKILLS = [
     "Requirements Analysis",
 ]
 
-
-# =========================
-# Extract skills from text
-# =========================
+# ==========================================
+# Functions (أكواد المعالجة والدمج)
+# ==========================================
 
 def extract_skills_from_text(text):
     if not text:
         return []
-
     text_lower = str(text).lower()
-
     found = []
-
     for skill in COMMON_SKILLS:
         pattern = r"\b" + re.escape(skill.lower()) + r"\b"
-
         if re.search(pattern, text_lower):
             found.append(skill)
-
     return found
 
-
-# =========================
-# Combine original + extracted skills
-# =========================
-
 def normalize_skills(value):
-    """
-    Convert skills from different formats into a list.
-    """
-
     if value is None:
         return []
-
     if isinstance(value, list):
         return [str(skill).strip() for skill in value if str(skill).strip()]
-
     if isinstance(value, str):
         value = value.strip()
-
         if not value or value.upper() == "N/A":
             return []
-
-        # Try JSON list if stored as a string
         try:
             parsed = json.loads(value)
-
             if isinstance(parsed, list):
-                return [
-                    str(skill).strip()
-                    for skill in parsed
-                    if str(skill).strip()
-                ]
+                return [str(skill).strip() for skill in parsed if str(skill).strip()]
         except (json.JSONDecodeError, TypeError):
             pass
-
-        # Otherwise split common separators
-        return [
-            skill.strip()
-            for skill in re.split(r",|;|\|", value)
-            if skill.strip()
-        ]
-
+        return [skill.strip() for skill in re.split(r",|;|\|", value) if skill.strip()]
     return []
 
-
 def combine_skills(original_skills, extracted_skills):
-    """
-    Combine source skills and extracted skills
-    while removing duplicates.
-    """
-
     original = normalize_skills(original_skills)
     extracted = normalize_skills(extracted_skills)
-
     combined = []
     seen = set()
-
     for skill in original + extracted:
         key = skill.lower().strip()
-
         if key and key not in seen:
             combined.append(skill.strip())
             seen.add(key)
-
     return ", ".join(combined) if combined else "N/A"
 
+# ==========================================
+# Execution Pipeline
+# ==========================================
 
-# =========================
-# Build combined text
-# =========================
-
+# دمج النصوص لفحصها (يشمل description إذا كان موجوداً)
 df["combined_text"] = (
     df["job_title"].fillna("").astype(str) + " " +
-    df["description"].fillna("").astype(str) + " " +
+    (df["description"].fillna("").astype(str) if "description" in df.columns else "") + " " +
     df["employment_type"].fillna("").astype(str) + " " +
     df["experience_level"].fillna("").astype(str)
 )
 
+# استخراج المهارات
+df["extracted_skills"] = df["combined_text"].apply(extract_skills_from_text)
 
-# =========================
-# Extract skills
-# =========================
+# دمج المهارات الأصلية مع المستخرجة إذا كان عمود skills متوفراً
+if "skills" in df.columns:
+    df["final_skills"] = df.apply(
+        lambda row: combine_skills(row["skills"], row["extracted_skills"]),
+        axis=1
+    )
+    print(df[["job_title", "skills", "extracted_skills", "final_skills"]].to_string(index=False))
+else:
+    df["final_skills"] = df["extracted_skills"].apply(lambda s: ", ".join(s) if s else "N/A")
+    print(df[["job_title", "final_skills"]].to_string(index=False))
 
-df["extracted_skills"] = df["combined_text"].apply(
-    extract_skills_from_text
-)
-
-
-# =========================
-# Combine original skills
-# with extracted skills
-# =========================
-
-df["final_skills"] = df.apply(
-    lambda row: combine_skills(
-        row["skills"],
-        row["extracted_skills"]
-    ),
-    axis=1
-)
-
-
-# =========================
-# Display results
-# =========================
-
-print("\n===== RESULTS =====\n")
-
-print(
-    df[
-        [
-            "job_title",
-            "skills",
-            "extracted_skills",
-            "final_skills"
-        ]
-    ].to_string(index=False)
-)
-
-
-# =========================
-# Save enriched data
-# =========================
-
+# حفظ البيانات المثرية
 output_file = "data/jobs_results_enriched.json"
-
-df.to_json(
-    output_file,
-    orient="records",
-    force_ascii=False,
-    indent=2
-)
-
-
+df.to_json(output_file, orient="records", force_ascii=False, indent=2)
 print(f"\nEnriched data saved to: {output_file}")
