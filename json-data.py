@@ -16,29 +16,26 @@ from spacy.matcher import PhraseMatcher
 
 # Add near the top with your other constants
 COMMON_SKILLS = [
-    "Python", "Java", "JavaScript", "SQL", "Excel", "React", "Node.js",
-    "AWS", "Azure", "Docker", "Kubernetes", "Selenium", "Jira", "Agile",
-    "Scrum", "Git", "C++", "C#", "Power BI", "Tableau", "REST API",
-    "Machine Learning", "Data Analysis", "QA Testing", "Automation Testing",
-    "Manual Testing", "TestNG", "JUnit", "Postman", "Linux", "Cloud Computing"
-    # add whatever's relevant to the roles you're scraping (QA/Data roles it looks like)
-]
+    # Testing & QA
+    "Manual Testing", "Automation Testing", "Selenium", "TestNG", "JUnit",
+    "Postman", "API Testing", "Regression Testing", "Test Cases", "QA",
+    "Quality Assurance", "Cypress", "Appium", "Load Testing", "Performance Testing",
+    "Bug Tracking", "Test Automation Framework",
 
-import re
+    # Data
+    "SQL", "Python", "Excel", "Power BI", "Tableau", "Data Analysis",
+    "Data Visualization", "ETL", "Machine Learning", "Data Cleaning",
+    "Pandas", "NumPy", "R", "Statistics",
+
+    # Dev/General tech
+    "Java", "JavaScript", "C++", "C#", "Node.js", "React", "REST API",
+    "Git", "GitHub", "Docker", "Kubernetes", "AWS", "Azure", "Linux",
+    "Agile", "Scrum", "Jira", "CI/CD",
+]
 
 def extract_skills_from_text(text):
     if not text:
         return "N/A"
     text_lower = text.lower()
-    found = [skill for skill in COMMON_SKILLS 
-             if re.search(r'\b' + re.escape(skill.lower()) + r'\b', text_lower)]
+    found = [skill for skill in COMMON_SKILLS if skill.lower() in text_lower]
     return ", ".join(found) if found else "N/A"
-
-df["combined_text"] = (
-    df["job_title"].fillna("") + " " +
-    df["employment_type"].fillna("") + " " +
-    df["experience_level"].fillna("")
-)
-df["extracted_skills"] = df["combined_text"].apply(extract_skills_from_text)
-print(df[["job_title", "extracted_skills"]])
-
