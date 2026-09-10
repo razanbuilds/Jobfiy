@@ -19,6 +19,181 @@ df = pd.DataFrame(raw)
 
 
 # =========================
+# Extract experience level
+# =========================
+
+def extract_experience_level(title, description):
+    title_text = str(title).lower()
+    description_text = str(description).lower()
+
+    # =========================
+    # 1. Check job title first
+    # =========================
+
+    if re.search(r"\bintern(ship)?\b", title_text):
+        return "Intern"
+
+    if re.search(r"\bsenior\s+lead\b", title_text):
+        return "Senior Lead"
+
+    if re.search(r"\bprincipal\b", title_text):
+        return "Principal"
+
+    if re.search(r"\b(?:senior|sr\.?)\b", title_text):
+        return "Senior"
+
+    if re.search(r"\b(?:lead|team lead|leader)\b", title_text):
+        return "Lead"
+
+    if re.search(r"\b(?:manager|manger)\b", title_text):
+        return "Manager"
+
+    if re.search(r"\bdirector\b", title_text):
+        return "Director"
+
+    if re.search(r"\b(?:junior|jr\.?|entry[- ]level)\b", title_text):
+        return "Junior"
+
+    # =========================
+    # 2. Check years of experience
+    # =========================
+
+    text = description_text
+
+    # Examples:
+    # 1-2 years
+    # 2 years
+    # 3 years of experience
+    # 5-7 years
+    # 10+ years
+    # 15+ years
+
+    # Convert written numbers to digits
+    number_words = {
+        "one": "1",
+        "two": "2",
+        "three": "3",
+        "four": "4",
+        "five": "5",
+        "six": "6",
+        "seven": "7",
+        "eight": "8",
+        "nine": "9",
+        "ten": "10",
+    }
+
+    for word, number in number_words.items():
+        text = re.sub(
+            rf"\b{word}\b(?=\s+years?)",
+            number,
+            text
+        )
+
+    # Range: 1-2 years / 1 to 2 years
+    match = re.search(
+        r"\b(\d+)\s*(?:-|to)\s*(\d+)\s*years?",
+        text
+    )
+
+    if match:
+        min_years = int(match.group(1))
+
+        if min_years <= 2:
+            return "Junior"
+
+        if min_years <= 5:
+            return "Mid Level"
+
+        return "Senior"
+
+    # Plus: 10+ years / 15+ years
+    match = re.search(
+        r"\b(\d+)\s*\+\s*years?",
+        text
+    )
+
+    if match:
+        years = int(match.group(1))
+
+        if years <= 2:
+            return "Junior"
+
+        if years <= 5:
+            return "Mid Level"
+
+        return "Senior"
+
+    # Minimum / at least X years
+    match = re.search(
+        r"\b(?:minimum|at least)\s+(\d+)\s*years?",
+        text
+    )
+
+    if match:
+        years = int(match.group(1))
+
+        if years <= 2:
+            return "Junior"
+
+        if years <= 5:
+            return "Mid Level"
+
+        return "Senior"
+
+    # Simple: X years of experience
+    match = re.search(
+        r"\b(\d+)\s*years?\s+(?:of\s+)?experience\b",
+        text
+    )
+
+    if match:
+        years = int(match.group(1))
+
+        if years <= 2:
+            return "Junior"
+
+        if years <= 5:
+            return "Mid Level"
+
+        return "Senior"
+
+    # Experience: 7-10 / Experience: 15+
+    match = re.search(
+        r"\bexperience\s*:\s*(\d+)\s*(?:-|to|\+)",
+        text
+    )
+
+    if match:
+        years = int(match.group(1))
+
+        if years <= 2:
+            return "Junior"
+
+        if years <= 5:
+            return "Mid Level"
+
+        return "Senior"
+
+    return "N/A"
+
+
+
+
+# =========================
+# Create experience level column
+# =========================
+
+df["experience_level"] = df.apply(
+    lambda row: extract_experience_level(
+        row["job_title"],
+        row["description"]
+    ),
+    axis=1
+)
+
+
+
+# =========================
 # Common skills
 # =========================
 
@@ -641,6 +816,8 @@ SKILL_NORMALIZATION = {
     "ISO9001": "ISO 9001",
     "QualityAssurance": "Quality Assurance",
 }
+
+
 # =========================
 # Extract skills from text
 # =========================
@@ -817,6 +994,19 @@ print(
 # =========================
 
 output_file = "data/jobs_results_enriched.json"
+
+
+print("\n===== SUMMARY =====")
+print("Total jobs:", len(df))
+print("Jobs with skills:", (df["final_skills"] != "N/A").sum())
+print("Jobs without skills:", (df["final_skills"] == "N/A").sum())
+print("Jobs with N/A experience:", (df["experience_level"] == "N/A").sum())
+print("Unique skills:", len(set(
+    skill.strip()
+    for skills in df["final_skills"]
+    if skills != "N/A"
+    for skill in skills.split(",")
+)))
 
 df.to_json(
     output_file,
