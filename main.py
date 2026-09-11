@@ -24,6 +24,35 @@ JSON_PATH = DATA_DIR / "jobs_results.json"
 
 all_jobs = []
 
+# Saudi cities used to identify city names
+# from the official Jooble location field
+SAUDI_CITIES = [
+    "Riyadh",
+    "Jeddah",
+    "Mecca",
+    "Makkah",
+    "Medina",
+    "Madinah",
+    "Dammam",
+    "Khobar",
+    "Al Khobar",
+    "Dhahran",
+    "Hofuf",
+    "Al Hofuf",
+    "Hafar Al-Batin",
+    "Jubail",
+    "Tabuk",
+    "Abha",
+    "Khamis Mushait",
+    "Taif",
+    "Yanbu",
+    "Najran",
+    "Jizan",
+    "Buraidah",
+    "Qassim",
+    "Al Ahsa",
+]
+
 # Add near the top with your other constants
 COMMON_SKILLS = [
     # Testing & QA
@@ -61,6 +90,29 @@ def extract_skills_from_text(text):
 
 
 # ==========================================
+# Extract a city only if it actually appears
+# in the source text.
+# ==========================================
+def extract_saudi_city(text):
+    if not text:
+        return "N/A"
+
+    # Remove HTML tags from the source text
+    text = re.sub(r"<[^>]+>", " ", str(text))
+
+    # Search for a known Saudi city in the text
+    for city in SAUDI_CITIES:
+        if re.search(
+            r"(?<!\w)" + re.escape(city) + r"(?!\w)",
+            text,
+            re.IGNORECASE
+        ):
+            return city
+
+    # No city was found in the source data
+    return "N/A"
+
+# ==========================================
 # 2. Fetch jobs from JSearch API
 # ==========================================
 def fetch_jsearch():
@@ -69,77 +121,152 @@ def fetch_jsearch():
         return
 
     print("⏳ Fetching jobs from JSearch...")
+
     url = "https://jsearch.p.rapidapi.com/search-v2"
+
     headers = {
         "x-rapidapi-key": RAPID_KEY.strip(),
         "x-rapidapi-host": RAPID_HOST.strip(),
     }
+
     params = {
         "query": "Software Quality Assurance OR Data in Saudi Arabia",
         "page": "1",
         "num_pages": "1",
     }
+
     try:
-        res = requests.get(url, headers=headers, params=params, timeout=30)
+        res = requests.get(
+            url,
+            headers=headers,
+            params=params,
+            timeout=30
+        )
+
         if res.status_code != 200:
-            print(f"⚠️  JSearch failed (status {res.status_code}): {res.text}")
+            print(
+                f"⚠️  JSearch failed "
+                f"(status {res.status_code}): {res.text}"
+            )
             return
 
         data = res.json().get("data", {}).get("jobs", [])
+
         for job in data:
+
+            # ------------------------------------------
+            # Salary
+            # ------------------------------------------
             min_salary = job.get("job_min_salary")
             max_salary = job.get("job_max_salary")
             currency = job.get("job_salary_currency", "")
             period = job.get("job_salary_period", "")
+
             if min_salary or max_salary:
                 parts = []
+
                 if min_salary:
                     parts.append(str(min_salary))
+
                 if max_salary:
                     parts.append(str(max_salary))
-                salary = f"{' - '.join(parts)} {currency} / {period}".strip()
+
+                salary = (
+                    f"{' - '.join(parts)} "
+                    f"{currency} / {period}"
+                ).strip()
             else:
                 salary = "N/A"
 
-            # Prefer the structured skills field from the API when present;
-            # only fall back to keyword-matching the full description text
-            # if that field is empty.
+
+            # ------------------------------------------
+            # Description
+            # ------------------------------------------
             description = job.get("job_description", "")
+            job_title = job.get("job_title", "")
+
+            # Search for skills in both the job title and description
+            text_for_skills = f"{job_title} {description}"
+
+            # ------------------------------------------
+            # Skills
+            # ------------------------------------------
             skills_list = job.get("job_required_skills")
+
             if isinstance(skills_list, list) and skills_list:
                 skills = ", ".join(skills_list)
+
             elif skills_list:
                 skills = str(skills_list)
-            else:
-                skills = extract_skills_from_text(description)
 
+            else:
+                skills = extract_skills_from_text(text_for_skills)
+            # ------------------------------------------
+            # Experience
+            # ------------------------------------------
             exp = job.get("job_required_experience")
+
             if not isinstance(exp, dict):
                 exp = {}
 
             if exp.get("no_experience_required"):
                 experience_level = "No experience required"
+
             elif exp.get("required_experience_in_months"):
-                experience_level = f"{exp.get('required_experience_in_months')} months experience"
+                experience_level = (
+                    f"{exp.get('required_experience_in_months')} "
+                    f"months experience"
+                )
+
             elif exp.get("experience_mentioned"):
                 experience_level = "Experience mentioned (unspecified)"
+
             else:
                 experience_level = "N/A"
 
+            # Location
+            #
+            # Use only values actually returned by JSearch.
+            # Nothing is added or guessed.
+            city = job.get("job_city")
+            country = job.get("job_country")
+
+            # Normalize the country code returned by JSearch
+            if country == "SA":
+                country = "Saudi Arabia"
+
+            location_parts = []
+
+            if city:
+                location_parts.append(str(city).strip())
+
+            if country:
+                location_parts.append(str(country).strip())
+
+            location = ", ".join(location_parts) if location_parts else "N/A"
+
+            # ------------------------------------------
+            # Save job
+            # ------------------------------------------
             all_jobs.append({
                 "source": "JSearch",
-                "job_title": job.get("job_title"),
+                "job_title": job_title,
                 "company": job.get("employer_name"),
-                "city": job.get("job_city", "N/A"),
-                "location": f"{job.get('job_city', '')}, {job.get('job_country', '')}".strip(", "),
+                "city": city if city else "N/A",
+                "location": location,
                 "employment_type": job.get("job_employment_type"),
                 "salary": salary,
                 "skills": skills,
                 "experience_level": experience_level,
                 "apply_link": job.get("job_apply_link"),
                 "posted_at": job.get("job_posted_at_datetime_utc"),
-                "description": description if description else "N/A",
+                "description": (
+                    description
+                    if description
+                    else "N/A"
+                ),
             })
+
         print(f"✔️  Fetched {len(data)} jobs from JSearch.")
 
     except Exception as e:
@@ -155,32 +282,82 @@ def fetch_jooble():
         return
 
     print("⏳ Fetching jobs from Jooble...")
+
     url = f"https://sa.jooble.org/api/{JOOBLE_KEY.strip()}"
-    payload = {"keywords": "Software Quality Assurance", "location": "Saudi Arabia"}
+
+    payload = {
+        "keywords": "Software Quality Assurance",
+        "location": "Saudi Arabia"
+    }
+
     try:
-        res = requests.post(url, json=payload, timeout=30)
+        res = requests.post(
+            url,
+            json=payload,
+            timeout=30
+        )
+
         if res.status_code != 200:
-            print(f"⚠️  Jooble failed (status {res.status_code}): {res.text}")
+            print(
+                f"⚠️  Jooble failed "
+                f"(status {res.status_code}): {res.text}"
+            )
             return
+
         data = res.json().get("jobs", [])
+
+
         for job in data:
-            # Jooble's "snippet" is the closest thing to a description here.
+
+            # Jooble's "snippet" is the closest
+            # available field to a job description.
             description = job.get("snippet", "")
+            job_title = job.get("title", "")
+
+            # Search for skills in both the job title and description
+            text_for_skills = f"{job_title} {description}"
+
+            jooble_location = job.get("location")
+
+            if jooble_location:
+                jooble_location = str(jooble_location).strip()
+            else:
+                jooble_location = ""
+
+            # Extract the city only when the location contains a known Saudi city
+            city = extract_saudi_city(jooble_location)
+
+            # If the source gives only the country, keep the city as N/A
+            if jooble_location.lower() == "saudi arabia":
+                city = "N/A"
+
+            # Keep the original source location
+            location = jooble_location if jooble_location else "N/A"
+
+            # ------------------------------------------
+            # Save job
+            # ------------------------------------------
             all_jobs.append({
                 "source": "Jooble",
-                "job_title": job.get("title"),
+                "job_title": job_title,
                 "company": job.get("company"),
-                "city": job.get("location", "N/A"),
-                "location": job.get("location"),
-                "employment_type": job.get("type", "N/A"),
+                "city": city,
+                "location": location,
+                "employment_type": job.get("type") or "N/A",
                 "salary": job.get("salary", "N/A"),
-                "skills": extract_skills_from_text(description),
+                "skills": extract_skills_from_text(text_for_skills),
                 "experience_level": "N/A",
                 "apply_link": job.get("link"),
                 "posted_at": job.get("updated"),
-                "description": description if description else "N/A",
+                "description": (
+                    description
+                    if description
+                    else "N/A"
+                ),
             })
+
         print(f"✔️  Fetched {len(data)} jobs from Jooble.")
+
     except Exception as e:
         print(f"❌ Error connecting to Jooble: {e}")
 
@@ -312,5 +489,5 @@ if __name__ == "__main__":
     main()
 
     # Optional: uncomment these to inspect results after a run.
-    print(show_db_summary())
-    print(show_json_skills())
+    show_db_summary()
+    show_json_skills()

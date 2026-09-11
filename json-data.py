@@ -17,6 +17,12 @@ if isinstance(raw, dict):
 
 df = pd.DataFrame(raw)
 
+print("\n===== CITIES CHECK =====")
+
+print("Number of unique cities:", df["city"].nunique())
+
+print("\nCities:")
+print(df["city"].value_counts(dropna=False))
 
 # =========================
 # Extract experience level
