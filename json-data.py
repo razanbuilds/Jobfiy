@@ -775,11 +775,12 @@ COMMON_SKILLS = [
     "Compliance",
     "ISO",
     "ISO 9001",
-    "Manufacturing"
+    "ISO 9001",
+    "Manufacturing",
 
-    # =========================
-    # Additional Skills Found in Job Data
-    # =========================
+# =========================
+# Additional Skills Found in Job Data
+# =========================
 
     "SPC",
     "Six Sigma",
@@ -798,6 +799,11 @@ COMMON_SKILLS = [
     "Manual Testing",
     "Lean",
     "MRP",
+    "Web Applications",
+    "AI",
+    "HSE",
+    "Construction",
+    "Guest Experience",
 ]
 # =========================
 # Skill Normalization
@@ -823,7 +829,76 @@ SKILL_NORMALIZATION = {
     "QualityAssurance": "Quality Assurance",
 }
 
+# =========================
+# Extract explicitly listed skills
+# =========================
+# Extract skills listed directly under sections such as
+# "Required Skills", "Key technologies", or "Technical Skills".
 
+# =========================
+# Extract explicitly listed skills
+# =========================
+# Extract only clearly listed skills from sections such as
+# "Required Skills" and "Key technologies".
+# Avoid capturing unrelated text after the section.
+
+def extract_listed_skills(text):
+    if not text:
+        return []
+
+    text_clean = re.sub(r"<[^>]+>", " ", str(text))
+    text_clean = text_clean.replace("&nbsp;", " ")
+    text_clean = text_clean.replace("&amp;", "&")
+
+    found = []
+
+    # -------------------------------------------------
+    # 1. Extract "Key technologies: ..."
+    # -------------------------------------------------
+
+    tech_match = re.search(
+        r"key technologies\s*:\s*([^\n\r]+)",
+        text_clean,
+        flags=re.IGNORECASE
+    )
+
+    if tech_match:
+        technologies = re.split(r",|;|\|", tech_match.group(1))
+
+        for skill in technologies:
+            skill = skill.strip()
+
+            if skill and len(skill) <= 50:
+                found.append(skill)
+
+    # -------------------------------------------------
+    # 2. Extract bullet points under "Required Skills"
+    # -------------------------------------------------
+
+    skills_match = re.search(
+        r"required skills\s*:?\s*(.*?)(?="
+        r"\n\s*(?:job details|qualifications|responsibilities|requirements|"
+        r"education|experience)\b|$)",
+        text_clean,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+
+    if skills_match:
+        section = skills_match.group(1)
+
+        # Only accept bullet-style items
+        bullet_items = re.findall(
+            r"[•●▪◦]\s*([^\n\r•●▪◦]+)",
+            section
+        )
+
+        for skill in bullet_items:
+            skill = skill.strip()
+
+            if skill and len(skill) <= 100:
+                found.append(skill)
+
+    return list(dict.fromkeys(found))
 # =========================
 # Extract skills from text
 # =========================
@@ -842,7 +917,7 @@ def extract_skills_from_text(text):
     text_clean = text_clean.replace("&gt;", ">")
 
     # Normalize spaces
-    text_clean = re.sub(r"<[^>]+>", " ", str(text))
+    text_clean = re.sub(r"\s+", " ", text_clean).strip()
 
     text_lower = text_clean.lower()
 
@@ -855,6 +930,7 @@ def extract_skills_from_text(text):
             found.append(skill)
 
     return list(dict.fromkeys(found))
+
 
 
 # =========================
@@ -951,10 +1027,23 @@ df["combined_text"] = (
 # =========================
 # Extract skills
 # =========================
-
-# Extract skills from job text
+# Extract skills from the job title and description
 df["extracted_skills"] = df["combined_text"].apply(
     extract_skills_from_text
+)
+
+# Extract skills explicitly listed in sections such as
+# "Required Skills" and "Key technologies"
+df["listed_skills"] = df["description"].apply(
+    extract_listed_skills
+)
+
+# Combine both extraction methods
+df["extracted_skills"] = df.apply(
+    lambda row: list(dict.fromkeys(
+        row["extracted_skills"] + row["listed_skills"]
+    )),
+    axis=1
 )
 
 # Normalize extracted skills
