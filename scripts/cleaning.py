@@ -14,8 +14,9 @@ import pandas as pd
 # 1. Load raw data
 # -------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
-RAW_PATH = SCRIPT_DIR / "jobs_master.json"
-OUTPUT_PATH = SCRIPT_DIR / "jobs_cleaned.json"
+BASE_DIR = Path(__file__).resolve().parent.parent
+RAW_PATH = BASE_DIR / "data" / "jobs_master.json"
+OUTPUT_PATH = BASE_DIR / "data" / "jobs_cleaned.json"
 
 with open(RAW_PATH, "r", encoding="utf-8") as f:
     data = json.load(f)
@@ -206,7 +207,7 @@ print("\nDuplicate jobs remaining:", df.duplicated(subset=["job_title", "company
 # -------------------------------------------------------------------------
 # 11. Save
 # -------------------------------------------------------------------------
-OUTPUT_PATH.parent.mkdir(exist_ok=True)
+OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 df.to_json(OUTPUT_PATH, orient="records", force_ascii=False, indent=2, date_format="iso")
 
 print(f"\nSaved {len(df)} rows to {OUTPUT_PATH.resolve()}")
