@@ -24,42 +24,6 @@ JSON_PATH = DATA_DIR / "jobs_results.json"
 
 all_jobs = []
 
-# Add near the top with your other constants
-COMMON_SKILLS = [
-    # Testing & QA
-    "Manual Testing", "Automation Testing", "Selenium", "TestNG", "JUnit",
-    "Postman", "API Testing", "Regression Testing", "Test Cases", "QA",
-    "Quality Assurance", "Cypress", "Appium", "Load Testing", "Performance Testing",
-    "Bug Tracking", "Test Automation Framework",
-
-    # Data
-    "SQL", "Python", "Excel", "Power BI", "Tableau", "Data Analysis",
-    "Data Visualization", "ETL", "Machine Learning", "Data Cleaning",
-    "Pandas", "NumPy", "R", "Statistics",
-
-    # Dev/General tech
-    "Java", "JavaScript", "C++", "C#", "Node.js", "React", "REST API",
-    "Git", "GitHub", "Docker", "Kubernetes", "AWS", "Azure", "Linux",
-    "Agile", "Scrum", "Jira", "CI/CD",
-]
-
-
-def extract_skills_from_text(text):
-    """
-    Extract known skills from free text (job description) using
-    word-boundary regex matching so short tokens like 'R' or 'QA'
-    don't match inside unrelated words.
-    """
-    if not text:
-        return "N/A"
-    text_lower = text.lower()
-    found = [
-        skill for skill in COMMON_SKILLS
-        if re.search(r'\b' + re.escape(skill.lower()) + r'\b', text_lower)
-    ]
-    return ", ".join(found) if found else "N/A"
-
-
 # Saudi cities used to identify city names
 # from the official Jooble location field
 SAUDI_CITIES = [
@@ -197,21 +161,51 @@ def fetch_jsearch():
             max_salary = job.get("job_max_salary")
             currency = job.get("job_salary_currency", "")
             period = job.get("job_salary_period", "")
-            salary = (
-                f"{min_salary or ''} - {max_salary or ''} {currency} / {period}".strip()
-                if (min_salary or max_salary)
-                else "N/A"
-            )
 
-            skills_list = job.get("job_required_skills")
-            if isinstance(skills_list, list):
-             skills = ", ".join(skills_list)
-            elif skills_list:
-             skills = str(skills_list)
+            if min_salary or max_salary:
+                parts = []
+
+                if min_salary:
+                    parts.append(str(min_salary))
+
+                if max_salary:
+                    parts.append(str(max_salary))
+
+                salary = (
+                    f"{' - '.join(parts)} "
+                    f"{currency} / {period}"
+                ).strip()
             else:
-             skills = "N/A"
-             
-            exp = job.get("job_required_experience") 
+                salary = "N/A"
+
+
+            # ------------------------------------------
+            # Description
+            # ------------------------------------------
+            description = job.get("job_description", "")
+            job_title = job.get("job_title", "")
+
+            # Search for skills in both the job title and description
+            text_for_skills = f"{job_title} {description}"
+
+            # ------------------------------------------
+            # Skills
+            # ------------------------------------------
+            skills_list = job.get("job_required_skills")
+
+            if isinstance(skills_list, list) and skills_list:
+                skills = ", ".join(skills_list)
+
+            elif skills_list:
+                skills = str(skills_list)
+
+            else:
+                skills = extract_skills_from_text(text_for_skills)
+            # ------------------------------------------
+            # Experience
+            # ------------------------------------------
+            exp = job.get("job_required_experience")
+
             if not isinstance(exp, dict):
                 exp = {}
 
@@ -266,6 +260,11 @@ def fetch_jsearch():
                 "experience_level": experience_level,
                 "apply_link": job.get("job_apply_link"),
                 "posted_at": job.get("job_posted_at_datetime_utc"),
+                "description": (
+                    description
+                    if description
+                    else "N/A"
+                ),
             })
 
         print(f"✔️  Fetched {len(data)} jobs from JSearch.")
@@ -283,8 +282,14 @@ def fetch_jooble():
         return
 
     print("⏳ Fetching jobs from Jooble...")
+
     url = f"https://sa.jooble.org/api/{JOOBLE_KEY.strip()}"
-    payload = {"keywords": "Software Quality Assurance", "location": "Saudi Arabia"}
+
+    payload = {
+        "keywords": "Software Quality Assurance",
+        "location": "Saudi Arabia"
+    }
+
     try:
         res = requests.post(
             url,
@@ -298,8 +303,40 @@ def fetch_jooble():
                 f"(status {res.status_code}): {res.text}"
             )
             return
-        data = res.json().get("data", {}).get("jobs", [])
+
+        data = res.json().get("jobs", [])
+
+
         for job in data:
+
+            # Jooble's "snippet" is the closest
+            # available field to a job description.
+            description = job.get("snippet", "")
+            job_title = job.get("title", "")
+
+            # Search for skills in both the job title and description
+            text_for_skills = f"{job_title} {description}"
+
+            jooble_location = job.get("location")
+
+            if jooble_location:
+                jooble_location = str(jooble_location).strip()
+            else:
+                jooble_location = ""
+
+            # Extract the city only when the location contains a known Saudi city
+            city = extract_saudi_city(jooble_location)
+
+            # If the source gives only the country, keep the city as N/A
+            if jooble_location.lower() == "saudi arabia":
+                city = "N/A"
+
+            # Keep the original source location
+            location = jooble_location if jooble_location else "N/A"
+
+            # ------------------------------------------
+            # Save job
+            # ------------------------------------------
             all_jobs.append({
                 "source": "Jooble",
                 "job_title": job_title,
@@ -308,10 +345,15 @@ def fetch_jooble():
                 "location": location,
                 "employment_type": job.get("type") or "N/A",
                 "salary": job.get("salary", "N/A"),
-                "skills": "N/A",
+                "skills": extract_skills_from_text(text_for_skills),
                 "experience_level": "N/A",
                 "apply_link": job.get("link"),
                 "posted_at": job.get("updated"),
+                "description": (
+                    description
+                    if description
+                    else "N/A"
+                ),
             })
 
         print(f"✔️  Fetched {len(data)} jobs from Jooble.")
@@ -449,7 +491,3 @@ if __name__ == "__main__":
     # Optional: uncomment these to inspect results after a run.
     show_db_summary()
     show_json_skills()
-
-    # Optional: uncomment these to inspect results after a run.
-    print(show_db_summary())
-    print(show_json_skills())
