@@ -14,30 +14,14 @@ import pandas as pd
 # 1. Load raw data
 # -------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
-BASE_DIR = Path(__file__).resolve().parent.parent
-RAW_PATH = BASE_DIR / "data" / "jobs_master.json"
-OUTPUT_PATH = BASE_DIR / "data" / "jobs_cleaned.json"
+RAW_PATH = SCRIPT_DIR / "jobs_master.json"
+OUTPUT_PATH = SCRIPT_DIR / "jobs_cleaned.json"
 
 with open(RAW_PATH, "r", encoding="utf-8") as f:
     data = json.load(f)
 
 df = pd.json_normalize(data)
 
-<<<<<<< HEAD
-=======
-print("\n===== EMPLOYMENT TYPE =====")
-print(df["employment_type"].value_counts(dropna=False))
-
-print("\n===== COMPANY =====")
-print(df["company"].value_counts(dropna=False).head(50))
-
-print("\n===== LOCATION =====")
-print(df["location"].value_counts(dropna=False).head(50))
-
-print("\n===== CITY =====")
-print(df["city"].value_counts(dropna=False).head(50))
-
->>>>>>> 13b4bc9c699d8d489924fc1762b234a267335f40
 print("Loaded shape:", df.shape)
 print("Columns:", df.columns.tolist())
 
@@ -55,7 +39,6 @@ MISSING_TOKENS = ["N/A", "NA", "None", "NULL", ""]
 df = df.replace(MISSING_TOKENS, pd.NA)
 
 # -------------------------------------------------------------------------
-<<<<<<< HEAD
 # 4. Clean text columns
 # -------------------------------------------------------------------------
 TEXT_COLUMNS = ["source", "job_title", "company", "city", "location",
@@ -64,51 +47,6 @@ TEXT_COLUMNS = ["source", "job_title", "company", "city", "location",
 for col in TEXT_COLUMNS:
     if col in df.columns:
         df[col] = df[col].astype("string").str.strip().str.replace(r"\s+", " ", regex=True)
-=======
-# 4. Standardize categorical values
-# -------------------------------------------------------------------------
-
-CATEGORICAL_COLUMNS = [
-    "source",
-    "company",
-    "city",
-    "location",
-    "employment_type",
-    "experience_level",
-]
-
-for col in CATEGORICAL_COLUMNS:
-    if col in df.columns:
-        df[col] = (
-            df[col]
-            .astype("string")
-            .str.strip()
-            .str.replace(r"\s+", " ", regex=True)
-        )
-
-EMPLOYMENT_TYPE_MAP = {
-    "full-time": "Full-time",
-    "full time": "Full-time",
-    "fulltime": "Full-time",
-}
-
-df["employment_type"] = df["employment_type"].replace(EMPLOYMENT_TYPE_MAP)
-
-
-def standardize_company(company):
-    if pd.isna(company):
-        return pd.NA
-
-    company = str(company).strip()
-
-    if company.islower():
-        company = company.title()
-
-    return company
-
-
-df["company"] = df["company"].apply(standardize_company)
->>>>>>> 13b4bc9c699d8d489924fc1762b234a267335f40
 
 
 def clean_description(value):
@@ -134,41 +72,8 @@ def clean_company(company):
 
 df["company"] = df["company"].apply(clean_company)
 
-<<<<<<< HEAD
 # -------------------------------------------------------------------------
 # 5. Type conversions
-=======
-
-# -------------------------------------------------------------------------
-# 5. Handle missing values
-# -------------------------------------------------------------------------
-# Keep missing values as NULL when no reliable source is available.
-# Do not replace missing values with arbitrary defaults.
-
-MISSING_VALUE_COLUMNS = [
-    "salary",
-    "city",
-    "employment_type",
-    "skills",
-    "final_skills",
-    "combined_text",
-    "listed_skills",
-    "extracted_skills",
-    "experience_level",
-    "posted_at",
-    "description",
-]
-
-print("\n===== MISSING VALUE HANDLING =====")
-
-for col in MISSING_VALUE_COLUMNS:
-    if col in df.columns:
-        missing_count = df[col].isna().sum()
-        print(f"{col}: {missing_count} missing values retained as NULL")
-
-# -------------------------------------------------------------------------
-# 6. Type conversions
->>>>>>> 13b4bc9c699d8d489924fc1762b234a267335f40
 # -------------------------------------------------------------------------
 df["posted_at"] = pd.to_datetime(df["posted_at"], format="mixed", errors="coerce", utc=True)
 df["salary"] = pd.to_numeric(df["salary"], errors="coerce").astype("Float64")
@@ -275,20 +180,6 @@ df["posted_day"] = df["posted_at"].dt.day.astype("Int64")
 # -------------------------------------------------------------------------
 # 9. Skills cleanup
 # -------------------------------------------------------------------------
-<<<<<<< HEAD
-=======
-
-# Clean extra whitespace in combined_text
-if "combined_text" in df.columns:
-    df["combined_text"] = (
-        df["combined_text"]
-        .astype("string")
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    )
-
-
->>>>>>> 13b4bc9c699d8d489924fc1762b234a267335f40
 def clean_skills(value):
     if pd.isna(value):
         return pd.NA
@@ -301,121 +192,7 @@ if "final_skills" in df.columns:
     df["final_skills"] = df["final_skills"].apply(clean_skills)
 
 # -------------------------------------------------------------------------
-<<<<<<< HEAD
 # 10. Final quality report
-=======
-# 11. Data quality checks
-# -------------------------------------------------------------------------
-
-print("\n===== DATA QUALITY CHECKS =====")
-
-# Check required fields
-REQUIRED_COLUMNS = ["job_title", "company", "location"]
-
-for col in REQUIRED_COLUMNS:
-    missing_count = df[col].isna().sum()
-    if missing_count == 0:
-        print(f"{col}: PASS")
-    else:
-        print(f"{col}: WARNING - {missing_count} missing values")
-
-# Check duplicate jobs
-duplicate_count = df.duplicated(
-    subset=["job_title", "company", "location"]
-).sum()
-
-if duplicate_count == 0:
-    print("Duplicate jobs: PASS")
-else:
-    print(f"Duplicate jobs: WARNING - {duplicate_count} duplicates")
-
-# Check experience levels
-VALID_LEVELS = [
-    "Intern",
-    "Junior",
-    "Mid Level",
-    "Senior",
-    "Senior Lead",
-    "Lead",
-    "Manager",
-    "Director",
-    "Principal",
-]
-
-invalid_levels = df.loc[
-    df["experience_level"].notna()
-    & ~df["experience_level"].isin(VALID_LEVELS),
-    "experience_level"
-].unique()
-
-if len(invalid_levels) == 0:
-    print("Experience levels: PASS")
-else:
-    print(f"Experience levels: WARNING - {invalid_levels}")
-
-# Check boolean columns
-for col in ["is_remote", "has_salary"]:
-    invalid_boolean = df[col].dropna().isin([True, False]).all()
-
-    if invalid_boolean:
-        print(f"{col}: PASS")
-    else:
-        print(f"{col}: WARNING - invalid values found")
-
-# Check salary values
-invalid_salary = (
-    df["salary"].notna()
-    & (df["salary"] < 0)
-).sum()
-
-if invalid_salary == 0:
-    print("Salary values: PASS")
-else:
-    print(f"Salary values: WARNING - {invalid_salary} negative values")
-    
-
-# -------------------------------------------------------------------------
-# 12. Whitespace checks
-# -------------------------------------------------------------------------
-
-TEXT_COLUMNS = [
-    "source",
-    "job_title",
-    "company",
-    "city",
-    "location",
-    "employment_type",
-    "skills",
-    "experience_level",
-    "apply_link",
-    "description",
-    "combined_text",
-    "extracted_skills",
-    "listed_skills",
-    "final_skills",
-]
-
-print("\n===== WHITESPACE CHECK =====")
-
-for col in TEXT_COLUMNS:
-    if col in df.columns:
-        values = df[col].dropna().astype(str)
-
-        leading_trailing = values.str.match(r"^\s|\s$").sum()
-        multiple_spaces = values.str.contains(r"\s{2,}", regex=True).sum()
-
-        if leading_trailing == 0 and multiple_spaces == 0:
-            print(f"{col}: PASS")
-        else:
-            print(
-                f"{col}: WARNING - "
-                f"{leading_trailing} leading/trailing, "
-                f"{multiple_spaces} multiple-space values"
-            )
-
-# -------------------------------------------------------------------------
-# 13. Final quality report
->>>>>>> 13b4bc9c699d8d489924fc1762b234a267335f40
 # -------------------------------------------------------------------------
 print("\n===== FINAL DATA QUALITY REPORT =====")
 print("Rows:", len(df))
@@ -427,13 +204,9 @@ print("\nJobs with salary:\n", df["has_salary"].value_counts(dropna=False))
 print("\nDuplicate jobs remaining:", df.duplicated(subset=["job_title", "company", "location"]).sum())
 
 # -------------------------------------------------------------------------
-<<<<<<< HEAD
 # 11. Save
-=======
-# 14. Save
->>>>>>> 13b4bc9c699d8d489924fc1762b234a267335f40
 # -------------------------------------------------------------------------
-OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+OUTPUT_PATH.parent.mkdir(exist_ok=True)
 df.to_json(OUTPUT_PATH, orient="records", force_ascii=False, indent=2, date_format="iso")
 
 print(f"\nSaved {len(df)} rows to {OUTPUT_PATH.resolve()}")
