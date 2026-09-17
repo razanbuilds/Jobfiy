@@ -337,17 +337,9 @@ for col in ["is_remote", "has_salary"]:
     else:
         print(f"{col}: WARNING - invalid values found")
 
-# Check salary values
-invalid_salary = (
-    df["salary"].notna()
-    & (df["salary"] < 0)
-).sum()
-
-if invalid_salary == 0:
-    print("Salary values: PASS")
-else:
-    print(f"Salary values: WARNING - {invalid_salary} negative values")
-    
+# Drop col salary
+df = df.drop(columns=["salary"])
+print(df["has_salary"])
 
 # -------------------------------------------------------------------------
 # 12. Whitespace checks
@@ -407,3 +399,7 @@ OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 df.to_json(OUTPUT_PATH, orient="records", force_ascii=False, indent=2, date_format="iso")
 
 print(f"\nSaved {len(df)} rows to {OUTPUT_PATH.resolve()}")
+
+null_percentages = df.isnull().mean() * 100
+print(null_percentages)
+print(df["has_salary"].value_counts())
