@@ -403,3 +403,8 @@ print(f"\nSaved {len(df)} rows to {OUTPUT_PATH.resolve()}")
 null_percentages = df.isnull().mean() * 100
 print(null_percentages)
 print(df["has_salary"].value_counts())
+df.columns = df.columns.str.upper()
+print(df[
+    ["SKILLS", "EXTRACTED_SKILLS", "LISTED_SKILLS", "FINAL_SKILLS"]
+].head())
+print(df.dtypes)
