@@ -14,10 +14,33 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
+# Load .env when running locally
 load_dotenv(dotenv_path=BASE_DIR / ".env")
+
+RAPID_HOST = os.getenv(
+    "RAPIDAPI_HOST",
+    "jsearch.p.rapidapi.com"
+)
+
+# Try environment variables first (local development)
 RAPID_KEY = os.getenv("RAPIDAPI_KEY")
-RAPID_HOST = os.getenv("RAPIDAPI_HOST", "jsearch.p.rapidapi.com")
 JOOBLE_KEY = os.getenv("JOOBLE_KEY")
+
+# If running on Databricks, read from Databricks Secrets
+if not RAPID_KEY or not JOOBLE_KEY:
+    try:
+        RAPID_KEY = dbutils.secrets.get(
+            scope="job-pipeline-secrets",
+            key="RAPIDAPI_KEY"
+        )
+
+        JOOBLE_KEY = dbutils.secrets.get(
+            scope="job-pipeline-secrets",
+            key="JOOBLE_KEY"
+        )
+
+    except Exception as e:
+        print("Could not load Databricks secrets:", e)
 
 DB_PATH = DATA_DIR / "jobs.db"
 JSON_PATH = DATA_DIR / "jobs_results.json"
