@@ -12,16 +12,26 @@ import sys
 from pathlib import Path
 
 
+import subprocess
+import sys
+from pathlib import Path
+
 # =========================================================
 # Project Paths
 # =========================================================
 
-BASE_DIR = Path(__file__).resolve().parent
+try:
+    BASE_DIR = Path(__file__).resolve().parent
+except NameError:
+    BASE_DIR = Path(
+        "/Workspace/Users/reyofalthobaiti@gmail.com/JopDataPipeline123"
+    )
 
 SCRAPER_SCRIPT = BASE_DIR / "main.py"
 CLEANING_SCRIPT = BASE_DIR / "scripts" / "cleaning.py"
 STAR_SCHEMA_SCRIPT = BASE_DIR / "scripts" / "load_star_schema.py"
 
+print("BASE_DIR:", BASE_DIR)
 
 # =========================================================
 # Run Pipeline Step
