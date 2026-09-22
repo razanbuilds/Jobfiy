@@ -7,25 +7,26 @@ Pipeline flow:
 3. Load data into Snowflake Star Schema
 """
 
-import subprocess
 import sys
 from pathlib import Path
 
-
-import subprocess
-import sys
-from pathlib import Path
 
 # =========================================================
 # Project Paths
 # =========================================================
 
-try:
-    BASE_DIR = Path(__file__).resolve().parent
-except NameError:
-    BASE_DIR = Path(
-        "/Workspace/Users/reyofalthobaiti@gmail.com/JopDataPipeline123"
-    )
+DATABRICKS_PROJECT = Path(
+    "/Workspace/Users/reyofalthobaiti@gmail.com/JopDataPipeline123"
+)
+
+if DATABRICKS_PROJECT.exists():
+    BASE_DIR = DATABRICKS_PROJECT
+else:
+    try:
+        BASE_DIR = Path(__file__).resolve().parent
+    except NameError:
+        BASE_DIR = Path.cwd()
+
 
 SCRAPER_SCRIPT = BASE_DIR / "main.py"
 CLEANING_SCRIPT = BASE_DIR / "scripts" / "cleaning.py"
@@ -33,43 +34,59 @@ STAR_SCHEMA_SCRIPT = BASE_DIR / "scripts" / "load_star_schema.py"
 
 print("BASE_DIR:", BASE_DIR)
 
+
 # =========================================================
 # Run Pipeline Step
 # =========================================================
 
 def run_step(step_name, script_path):
     """
-    Run one Python script as part of the pipeline.
+    Run a Python script inside the current Python process.
 
-    If the script fails, stop the entire pipeline.
+    This is important in Databricks so scripts can access
+    notebook-installed packages and Databricks utilities.
     """
 
     print("\n" + "=" * 60)
     print(f"STARTING: {step_name}")
     print("=" * 60)
 
-    # Make sure the script exists
     if not script_path.exists():
-        print(f"\nERROR: Script not found:")
-        print(script_path)
-        print("\nPipeline stopped.")
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"Script not found: {script_path}"
+        )
 
-    # Run using the same Python interpreter / venv
-    result = subprocess.run(
-        [sys.executable, str(script_path)],
-        cwd=BASE_DIR
-    )
+    # Read script
+    code = script_path.read_text(encoding="utf-8")
 
-    # Stop pipeline if this step fails
-    if result.returncode != 0:
+    # Give the executed script a correct __file__
+    script_globals = {
+        "__name__": "__main__",
+        "__file__": str(script_path),
+        "__builtins__": __builtins__,
+    }
+   
+
+# Pass Databricks utilities to executed scripts
+    if "dbutils" in globals():
+     script_globals["dbutils"] = globals()["dbutils"]
+
+    try:
+        exec(
+            compile(
+                code,
+                str(script_path),
+                "exec"
+            ),
+            script_globals
+        )
+
+    except Exception as error:
         print("\n" + "=" * 60)
         print(f"FAILED: {step_name}")
-        print(f"Exit code: {result.returncode}")
-        print("Pipeline stopped.")
         print("=" * 60)
-
-        sys.exit(result.returncode)
+        print(error)
+        raise
 
     print(f"\nCOMPLETED: {step_name}")
 
@@ -87,36 +104,23 @@ def main():
     print("\nPipeline Flow:")
     print("Scraping -> Cleaning -> Snowflake Star Schema")
 
-    # -----------------------------------------------------
-    # Step 1: Scrape Jobs
-    # -----------------------------------------------------
-
+    # 1. Scrape jobs
     run_step(
         "Job Scraping",
         SCRAPER_SCRIPT
     )
 
-    # -----------------------------------------------------
-    # Step 2: Clean & Transform Data
-    # -----------------------------------------------------
-
+    # 2. Clean data
     run_step(
         "Data Cleaning & Transformation",
         CLEANING_SCRIPT
     )
 
-    # -----------------------------------------------------
-    # Step 3: Load Snowflake Star Schema
-    # -----------------------------------------------------
-
+    # 3. Load into Snowflake
     run_step(
         "Snowflake Star Schema Load",
         STAR_SCHEMA_SCRIPT
     )
-
-    # -----------------------------------------------------
-    # Pipeline Finished
-    # -----------------------------------------------------
 
     print("\n" + "=" * 60)
     print("PIPELINE COMPLETED SUCCESSFULLY")

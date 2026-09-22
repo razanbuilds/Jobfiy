@@ -35,32 +35,41 @@ import snowflake.connector
 # 1. Project paths
 # ============================================================
 
-try:
-    SCRIPT_DIR = Path(__file__).resolve().parent
-except NameError:
-    SCRIPT_DIR = Path.cwd()
+from pathlib import Path
 
-if SCRIPT_DIR.name == "scripts":
-    BASE_DIR = SCRIPT_DIR.parent
-else:
-    BASE_DIR = SCRIPT_DIR
-
-CLEANED_DATA_PATH = (
-    BASE_DIR
-    / "data"
-    / "jobs_cleaned.json"
+# Databricks project location
+DATABRICKS_PROJECT = Path(
+    "/Workspace/Users/reyofalthobaiti@gmail.com/JopDataPipeline123"
 )
+
+# If running inside Databricks
+if DATABRICKS_PROJECT.exists():
+    BASE_DIR = DATABRICKS_PROJECT
+
+# If running locally / VS Code
+else:
+    try:
+        SCRIPT_DIR = Path(__file__).resolve().parent
+        BASE_DIR = (
+            SCRIPT_DIR.parent
+            if SCRIPT_DIR.name == "scripts"
+            else SCRIPT_DIR
+        )
+    except NameError:
+        BASE_DIR = Path.cwd()
+
+
+CLEANED_DATA_PATH = BASE_DIR / "data" / "jobs_cleaned.json"
 
 print("BASE_DIR :", BASE_DIR)
 print("Input    :", CLEANED_DATA_PATH)
+
 
 if not CLEANED_DATA_PATH.exists():
     raise FileNotFoundError(
         f"Cleaned data not found: {CLEANED_DATA_PATH}\n"
         "Run cleaning.py first."
     )
-
-
 # ============================================================
 # 2. Databricks Secrets
 # ============================================================
