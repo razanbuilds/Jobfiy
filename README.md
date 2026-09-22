@@ -1,63 +1,116 @@
-# Job Scraper (JSearch + Jooble)
+# Job Data Pipeline
 
-Fetches job listings from JSearch (RapidAPI) and Jooble, then saves them to:
-- `data/jobs_results.json`
-- `data/jobs.db` (SQLite)
+## Overview
 
-## 1. Setup
+This project is an end-to-end **Data Engineering Pipeline** that collects technology job postings, cleans and transforms the data, and loads it into a **Snowflake Data Warehouse**.
 
-1. Copy `.env.example` to `.env` and fill in your real keys:
-   ```bash
-   cp .env.example .env
-   ```
-2. Edit `.env`:
-   ```
-   RAPIDAPI_KEY=xxxx
-   RAPIDAPI_HOST=jsearch.p.rapidapi.com
-   JOOBLE_KEY=xxxx
-   ```
+The pipeline runs on **Azure Databricks** and is orchestrated using **Azure Data Factory (ADF)**.
 
-## 2. Run locally (without Docker)
+## Architecture
 
-```bash
-python -m venv venv
-source venv/bin/activate      # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
+```text
+JSearch API
+     ↓
+Data Ingestion
+     ↓
+Data Cleaning & Transformation
+     ↓
+Snowflake Star Schema
+     ↑
+Azure Databricks
+     ↑
+Azure Data Factory (ADF)
 ```
 
-## 3. Run with Docker
+## How the Pipeline Works
 
-Build the image:
-```bash
-docker build -t job-scraper .
+The pipeline runs through three main steps:
+
+**1. Data Ingestion — `main.py`**  
+Collects technology job postings from the JSearch API and stores the raw data.
+
+**2. Data Cleaning — `cleaning.py`**  
+Cleans and transforms the collected data by handling missing values, removing duplicates, processing dates, locations, skills, and other job attributes.
+
+**3. Data Loading — `load_star_schema.py`**  
+Loads the cleaned data incrementally into a Snowflake Star Schema.
+
+The entire process is executed through:
+
+`run_pipeline.py`
+
+## Snowflake Data Model
+
+The data warehouse contains:
+
+- `FACT_JOBS`
+- `DIM_JOB`
+- `DIM_COMPANY`
+- `DIM_LOCATION`
+- `DIM_DATE`
+- `DIM_SKILL`
+- `BRIDGE_JOB_SKILL`
+
+The bridge table is used to handle the many-to-many relationship between jobs and skills.
+
+## Automation
+
+The complete automated workflow is:
+
+```text
+Azure Data Factory
+        ↓
+Databricks Job
+        ↓
+run_pipeline.py
+        ↓
+JSearch API
+        ↓
+Data Cleaning
+        ↓
+Incremental Load
+        ↓
+Snowflake
 ```
 
-Run it, mounting a local `data/` folder so the output survives after the container exits, and passing your `.env` file in:
-```bash
-docker run --rm \
-  --env-file .env \
-  -v "$(pwd)/data:/app/data" \
-  job-scraper
+**Azure Data Factory** acts as the orchestrator and triggers the **Databricks Job** based on a schedule.
+
+**Azure Databricks** executes the Python pipeline.
+
+**Snowflake** stores the final transformed data in a Star Schema.
+
+## Security
+
+API keys and Snowflake credentials are securely stored using **Databricks Secrets** instead of being hard-coded in the source code.
+
+## Technologies
+
+- Python
+- Pandas
+- JSearch API
+- Azure Databricks
+- Azure Data Factory
+- Snowflake
+- SQL
+- GitHub
+
+## Project Structure
+
+```text
+JopDataPipeline123/
+│
+├── main.py
+├── run_pipeline.py
+│
+├── scripts/
+│   ├── cleaning.py
+│   └── load_star_schema.py
+│
+└── data/
 ```
 
-After it finishes, check `./data/jobs_results.json` and `./data/jobs.db` on your machine.
+## Final Pipeline
 
-## 4. Inspect the SQLite database
+**JSearch API → Databricks → Data Cleaning & Transformation → Snowflake → ADF Orchestration**
 
-```bash
-sqlite3 data/jobs.db "SELECT job_title, company, city FROM jobs LIMIT 5;"
-```
-
-## Project structure
-
-```
-job_scraper/
-├── main.py            # extraction script
-├── requirements.txt
-├── Dockerfile
-├── .dockerignore
-├── .gitignore
-├── .env.example        # template — copy to .env, never commit .env
-└── data/                # created at runtime, holds jobs.db + jobs_results.json
-```
+The result is an automated and reusable data pipeline for collecting and processing technology job market data.
