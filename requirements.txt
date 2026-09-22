@@ -1,2 +1,5 @@
-requests==2.32.3
-python-dotenv==1.0.1
+pandas
+requests
+snowflake-connector-python
+python-dotenv
+databricks-sdk
