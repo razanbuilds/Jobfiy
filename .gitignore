@@ -14,3 +14,6 @@ data/
 
 # OS
 .DS_Store
+.ipynb_checkpoints/
+data/jobs_master.json
+data/jobs_master.json

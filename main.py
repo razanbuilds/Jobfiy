@@ -4,28 +4,57 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from dotenv import load_dotenv
+
 import requests
+from dotenv import load_dotenv
 
-# ==========================================
-# 1. Setup: paths + environment variables
-# ==========================================
-BASE_DIR = Path(__file__).resolve().parent
+
+# ============================================================
+# 1. Setup
+# ============================================================
+
+try:
+    BASE_DIR = Path(__file__).resolve().parent
+except NameError:
+    BASE_DIR = Path.cwd()
+
 DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
-
-load_dotenv(dotenv_path=BASE_DIR / ".env")
-RAPID_KEY = os.getenv("RAPIDAPI_KEY")
-RAPID_HOST = os.getenv("RAPIDAPI_HOST", "jsearch.p.rapidapi.com")
-JOOBLE_KEY = os.getenv("JOOBLE_KEY")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "jobs.db"
 JSON_PATH = DATA_DIR / "jobs_results.json"
 
+load_dotenv(dotenv_path=BASE_DIR / ".env")
+
+RAPID_HOST = os.getenv(
+    "RAPIDAPI_HOST",
+    "jsearch.p.rapidapi.com"
+)
+
+RAPID_KEY = os.getenv("RAPIDAPI_KEY")
+
+
+# Databricks Secret fallback
+if not RAPID_KEY:
+    try:
+        RAPID_KEY = dbutils.secrets.get(
+            scope="job-pipeline-secrets",
+            key="RAPIDAPI_KEY"
+        )
+    except Exception as e:
+        print(
+            "Could not load RAPIDAPI_KEY "
+            f"from Databricks Secrets: {e}"
+        )
+
+
 all_jobs = []
 
-# Saudi cities used to identify city names
-# from the official Jooble location field
+
+# ============================================================
+# 2. Constants
+# ============================================================
+
 SAUDI_CITIES = [
     "Riyadh",
     "Jeddah",
@@ -53,322 +82,527 @@ SAUDI_CITIES = [
     "Al Ahsa",
 ]
 
-# Add near the top with your other constants
+
 COMMON_SKILLS = [
-    # Testing & QA
-    "Manual Testing", "Automation Testing", "Selenium", "TestNG", "JUnit",
-    "Postman", "API Testing", "Regression Testing", "Test Cases", "QA",
-    "Quality Assurance", "Cypress", "Appium", "Load Testing", "Performance Testing",
-    "Bug Tracking", "Test Automation Framework",
+    # Testing / QA
+    "Manual Testing",
+    "Automation Testing",
+    "Selenium",
+    "TestNG",
+    "JUnit",
+    "Postman",
+    "API Testing",
+    "Regression Testing",
+    "Test Cases",
+    "QA",
+    "Quality Assurance",
+    "Cypress",
+    "Appium",
+    "Load Testing",
+    "Performance Testing",
+    "Bug Tracking",
+    "Test Automation Framework",
 
     # Data
-    "SQL", "Python", "Excel", "Power BI", "Tableau", "Data Analysis",
-    "Data Visualization", "ETL", "Machine Learning", "Data Cleaning",
-    "Pandas", "NumPy", "R", "Statistics",
+    "SQL",
+    "Python",
+    "Excel",
+    "Power BI",
+    "Tableau",
+    "Data Analysis",
+    "Data Analytics",
+    "Data Visualization",
+    "ETL",
+    "Machine Learning",
+    "Data Cleaning",
+    "Pandas",
+    "NumPy",
+    "R",
+    "Statistics",
+    "Spark",
+    "PySpark",
+    "Databricks",
+    "Snowflake",
 
-    # Dev/General tech
-    "Java", "JavaScript", "C++", "C#", "Node.js", "React", "REST API",
-    "Git", "GitHub", "Docker", "Kubernetes", "AWS", "Azure", "Linux",
-    "Agile", "Scrum", "Jira", "CI/CD",
+    # Development
+    "Java",
+    "JavaScript",
+    "TypeScript",
+    "C++",
+    "C#",
+    "Node.js",
+    "React",
+    "REST API",
+    "Git",
+    "GitHub",
+
+    # Cloud / DevOps
+    "Docker",
+    "Kubernetes",
+    "AWS",
+    "Azure",
+    "GCP",
+    "Linux",
+    "DevOps",
+    "CI/CD",
+
+    # Project / Agile
+    "Agile",
+    "Scrum",
+    "Jira",
+
+    # Cybersecurity
+    "Cybersecurity",
+    "Information Security",
+    "Network Security",
 ]
+
+
+# ============================================================
+# 3. Helper functions
+# ============================================================
+
+def join_non_empty(parts, separator=", "):
+    cleaned_parts = [
+        str(part).strip()
+        for part in parts
+        if str(part).strip()
+    ]
+    return separator.join(cleaned_parts)
 
 
 def extract_skills_from_text(text):
     """
-    Extract known skills from free text (job description) using
-    word-boundary regex matching so short tokens like 'R' or 'QA'
-    don't match inside unrelated words.
+    Extract known technical skills from title + description.
     """
-    if not text:
-        return "N/A"
-    text_lower = text.lower()
-    found = [
-        skill for skill in COMMON_SKILLS
-        if re.search(r'\b' + re.escape(skill.lower()) + r'\b', text_lower)
-    ]
-    return ", ".join(found) if found else "N/A"
 
-
-# ==========================================
-# Extract a city only if it actually appears
-# in the source text.
-# ==========================================
-def extract_saudi_city(text):
     if not text:
         return "N/A"
 
-    # Remove HTML tags from the source text
-    text = re.sub(r"<[^>]+>", " ", str(text))
+    text_lower = str(text).lower()
+    found = []
 
-    # Search for a known Saudi city in the text
-    for city in SAUDI_CITIES:
-        if re.search(
-            r"(?<!\w)" + re.escape(city) + r"(?!\w)",
-            text,
-            re.IGNORECASE
-        ):
-            return city
+    for skill in COMMON_SKILLS:
+        pattern = (
+            r"\b"
+            + re.escape(skill.lower())
+            + r"\b"
+        )
 
-    # No city was found in the source data
-    return "N/A"
+        if re.search(pattern, text_lower):
+            found.append(skill)
 
-# ==========================================
-# 2. Fetch jobs from JSearch API
-# ==========================================
+    # Remove duplicates while keeping order
+    found = list(dict.fromkeys(found))
+
+    return join_non_empty(found) if found else "N/A"
+
+
+# ============================================================
+# 4. JSearch
+# ============================================================
+
 def fetch_jsearch():
+
     if not RAPID_KEY:
-        print("⚠️  RAPIDAPI_KEY not set, skipping JSearch.")
+        print(
+            "⚠️ RAPIDAPI_KEY not set. "
+            "Skipping JSearch."
+        )
         return
 
-    print("⏳ Fetching jobs from JSearch...")
+    print("\n⏳ Fetching jobs from JSearch...")
 
-    url = "https://jsearch.p.rapidapi.com/search-v2"
+    url = (
+        "https://jsearch.p.rapidapi.com/"
+        "search-v2"
+    )
 
     headers = {
-        "x-rapidapi-key": RAPID_KEY.strip(),
-        "x-rapidapi-host": RAPID_HOST.strip(),
+        "x-rapidapi-key": RAPID_KEY,
+        "x-rapidapi-host": RAPID_HOST,
+        "Content-Type": "application/json",
     }
 
     params = {
-        "query": "Software Quality Assurance OR Data in Saudi Arabia",
-        "page": "1",
+        "query": "technology jobs",
         "num_pages": "1",
+        "country": "sa",
+        "date_posted": "all",
     }
 
     try:
-        res = requests.get(
+        response = requests.get(
             url,
             headers=headers,
             params=params,
-            timeout=30
+            timeout=60,
         )
 
-        if res.status_code != 200:
+        if response.status_code != 200:
             print(
-                f"⚠️  JSearch failed "
-                f"(status {res.status_code}): {res.text}"
+                "⚠️ JSearch failed "
+                f"(status {response.status_code})"
             )
+            print(response.text[:500])
             return
 
-        data = res.json().get("data", {}).get("jobs", [])
+        response_data = response.json()
 
-        for job in data:
+        jobs = (
+            response_data
+            .get("data", {})
+            .get("jobs", [])
+        )
 
-            # ------------------------------------------
+        # One timestamp for this API run
+        fetched_at = time.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        added = 0
+
+        for job in jobs:
+
+            # ------------------------------------------------
+            # Title / description
+            # ------------------------------------------------
+
+            job_title = (
+                job.get("job_title")
+                or "N/A"
+            )
+
+            description = (
+                job.get("job_description")
+                or "N/A"
+            )
+
+            text_for_skills = (
+                f"{job_title} {description}"
+            )
+
+            # ------------------------------------------------
             # Salary
-            # ------------------------------------------
-            min_salary = job.get("job_min_salary")
-            max_salary = job.get("job_max_salary")
-            currency = job.get("job_salary_currency", "")
-            period = job.get("job_salary_period", "")
+            # ------------------------------------------------
 
-            if min_salary or max_salary:
-                parts = []
+            min_salary = job.get(
+                "job_min_salary"
+            )
 
-                if min_salary:
-                    parts.append(str(min_salary))
+            max_salary = job.get(
+                "job_max_salary"
+            )
 
-                if max_salary:
-                    parts.append(str(max_salary))
+            currency = (
+                job.get("job_salary_currency")
+                or ""
+            )
 
-                salary = (
-                    f"{' - '.join(parts)} "
-                    f"{currency} / {period}"
-                ).strip()
+            period = (
+                job.get("job_salary_period")
+                or ""
+            )
+
+            if (
+                min_salary is not None
+                or max_salary is not None
+            ):
+                salary_parts = []
+
+                if min_salary is not None:
+                    salary_parts.append(
+                        str(min_salary)
+                    )
+
+                if max_salary is not None:
+                    salary_parts.append(
+                        str(max_salary)
+                    )
+                salary = join_non_empty(
+                    salary_parts,
+                    separator=" - "
+                )
+
+                if currency:
+                    salary += f" {currency}"
+
+                if period:
+                    salary += f" / {period}"
+
             else:
                 salary = "N/A"
 
-
-            # ------------------------------------------
-            # Description
-            # ------------------------------------------
-            description = job.get("job_description", "")
-            job_title = job.get("job_title", "")
-
-            # Search for skills in both the job title and description
-            text_for_skills = f"{job_title} {description}"
-
-            # ------------------------------------------
+            # ------------------------------------------------
             # Skills
-            # ------------------------------------------
-            skills_list = job.get("job_required_skills")
+            # ------------------------------------------------
 
-            if isinstance(skills_list, list) and skills_list:
-                skills = ", ".join(skills_list)
+            skills_list = job.get(
+                "job_required_skills"
+            )
+
+            if (
+                isinstance(skills_list, list)
+                and skills_list
+            ):
+                skills = join_non_empty(
+                    skills_list
+                )
 
             elif skills_list:
                 skills = str(skills_list)
 
             else:
-                skills = extract_skills_from_text(text_for_skills)
-            # ------------------------------------------
-            # Experience
-            # ------------------------------------------
-            exp = job.get("job_required_experience")
-
-            if not isinstance(exp, dict):
-                exp = {}
-
-            if exp.get("no_experience_required"):
-                experience_level = "No experience required"
-
-            elif exp.get("required_experience_in_months"):
-                experience_level = (
-                    f"{exp.get('required_experience_in_months')} "
-                    f"months experience"
+                skills = extract_skills_from_text(
+                    text_for_skills
                 )
 
-            elif exp.get("experience_mentioned"):
-                experience_level = "Experience mentioned (unspecified)"
+            # ------------------------------------------------
+            # Experience
+            # ------------------------------------------------
+
+            experience = job.get(
+                "job_required_experience"
+            )
+
+            if not isinstance(
+                experience,
+                dict
+            ):
+                experience = {}
+
+            if experience.get(
+                "no_experience_required"
+            ):
+                experience_level = (
+                    "No experience required"
+                )
+
+            elif experience.get(
+                "required_experience_in_months"
+            ):
+                months = experience.get(
+                    "required_experience_in_months"
+                )
+
+                experience_level = (
+                    f"{months} months experience"
+                )
+
+            elif experience.get(
+                "experience_mentioned"
+            ):
+                experience_level = (
+                    "Experience mentioned "
+                    "(unspecified)"
+                )
 
             else:
                 experience_level = "N/A"
 
+            # ------------------------------------------------
             # Location
-            #
-            # Use only values actually returned by JSearch.
-            # Nothing is added or guessed.
+            # ------------------------------------------------
+
             city = job.get("job_city")
             country = job.get("job_country")
 
-            # Normalize the country code returned by JSearch
             if country == "SA":
                 country = "Saudi Arabia"
 
             location_parts = []
 
             if city:
-                location_parts.append(str(city).strip())
+                location_parts.append(
+                    str(city).strip()
+                )
 
             if country:
-                location_parts.append(str(country).strip())
+                location_parts.append(
+                    str(country).strip()
+                )
 
-            location = ", ".join(location_parts) if location_parts else "N/A"
+            location = (
+                join_non_empty(location_parts)
+                if location_parts
+                else "N/A"
+            )
 
-            # ------------------------------------------
-            # Save job
-            # ------------------------------------------
-            all_jobs.append({
+            # ------------------------------------------------
+            # Posted date
+            # ------------------------------------------------
+
+            # JSearch search-v2 may return relative Arabic
+            # values such as "قبل يومين".
+            # We preserve the source value here.
+            posted_at = (
+                job.get("job_posted_at")
+                or "N/A"
+            )
+
+            # ------------------------------------------------
+            # Apply link
+            # ------------------------------------------------
+
+            apply_link = (
+                job.get("job_apply_link")
+                or job.get("job_google_link")
+                or ""
+            )
+
+            # ------------------------------------------------
+            # Normalized record
+            # ------------------------------------------------
+
+            normalized_job = {
                 "source": "JSearch",
                 "job_title": job_title,
-                "company": job.get("employer_name"),
-                "city": city if city else "N/A",
+
+                "company": (
+                    job.get("employer_name")
+                    or "N/A"
+                ),
+
+                "city": city or "N/A",
                 "location": location,
-                "employment_type": job.get("job_employment_type"),
+
+                "employment_type": (
+                    job.get(
+                        "job_employment_type"
+                    )
+                    or "N/A"
+                ),
+
                 "salary": salary,
                 "skills": skills,
                 "experience_level": experience_level,
-                "apply_link": job.get("job_apply_link"),
-                "posted_at": job.get("job_posted_at_datetime_utc"),
-                "description": (
-                    description
-                    if description
-                    else "N/A"
-                ),
-            })
+                "apply_link": apply_link,
 
-        print(f"✔️  Fetched {len(data)} jobs from JSearch.")
+                "posted_at": posted_at,
 
-    except Exception as e:
-        print(f"❌ Error connecting to JSearch: {e}")
+                # Important for converting
+                # "قبل يومين" during cleaning
+                "fetched_at": fetched_at,
 
+                "description": description,
+            }
 
-# ==========================================
-# 3. Fetch jobs from Jooble API
-# ==========================================
-def fetch_jooble():
-    if not JOOBLE_KEY:
-        print("⚠️  JOOBLE_KEY not set, skipping Jooble.")
-        return
+            all_jobs.append(
+                normalized_job
+            )
 
-    print("⏳ Fetching jobs from Jooble...")
+            added += 1
 
-    url = f"https://sa.jooble.org/api/{JOOBLE_KEY.strip()}"
-
-    payload = {
-        "keywords": "Software Quality Assurance",
-        "location": "Saudi Arabia"
-    }
-
-    try:
-        res = requests.post(
-            url,
-            json=payload,
-            timeout=30
+        print(
+            f"✔️ Fetched {len(jobs)} jobs "
+            "from JSearch."
         )
 
-        if res.status_code != 200:
-            print(
-                f"⚠️  Jooble failed "
-                f"(status {res.status_code}): {res.text}"
-            )
-            return
+        print(
+            f"   Added {added} JSearch jobs."
+        )
 
-        data = res.json().get("jobs", [])
-
-
-        for job in data:
-
-            # Jooble's "snippet" is the closest
-            # available field to a job description.
-            description = job.get("snippet", "")
-            job_title = job.get("title", "")
-
-            # Search for skills in both the job title and description
-            text_for_skills = f"{job_title} {description}"
-
-            jooble_location = job.get("location")
-
-            if jooble_location:
-                jooble_location = str(jooble_location).strip()
-            else:
-                jooble_location = ""
-
-            # Extract the city only when the location contains a known Saudi city
-            city = extract_saudi_city(jooble_location)
-
-            # If the source gives only the country, keep the city as N/A
-            if jooble_location.lower() == "saudi arabia":
-                city = "N/A"
-
-            # Keep the original source location
-            location = jooble_location if jooble_location else "N/A"
-
-            # ------------------------------------------
-            # Save job
-            # ------------------------------------------
-            all_jobs.append({
-                "source": "Jooble",
-                "job_title": job_title,
-                "company": job.get("company"),
-                "city": city,
-                "location": location,
-                "employment_type": job.get("type") or "N/A",
-                "salary": job.get("salary", "N/A"),
-                "skills": extract_skills_from_text(text_for_skills),
-                "experience_level": "N/A",
-                "apply_link": job.get("link"),
-                "posted_at": job.get("updated"),
-                "description": (
-                    description
-                    if description
-                    else "N/A"
-                ),
-            })
-
-        print(f"✔️  Fetched {len(data)} jobs from Jooble.")
+    except requests.RequestException as e:
+        print(
+            "❌ JSearch connection error: "
+            f"{e}"
+        )
 
     except Exception as e:
-        print(f"❌ Error connecting to Jooble: {e}")
+        print(
+            "❌ JSearch processing error: "
+            f"{e}"
+        )
 
 
-# ==========================================
-# 4. Save results to SQLite
-# ==========================================
+# ============================================================
+# 5. Remove duplicates from current run
+# ============================================================
+
+def remove_current_run_duplicates(jobs):
+
+    unique_jobs = []
+    seen = set()
+
+    for job in jobs:
+
+        apply_link = (
+            job.get("apply_link")
+            or ""
+        ).strip()
+
+        if apply_link:
+            unique_key = (
+                "link",
+                apply_link.lower(),
+            )
+
+        else:
+            unique_key = (
+                "job",
+
+                str(
+                    job.get(
+                        "job_title",
+                        ""
+                    )
+                ).lower().strip(),
+
+                str(
+                    job.get(
+                        "company",
+                        ""
+                    )
+                ).lower().strip(),
+
+                str(
+                    job.get(
+                        "location",
+                        ""
+                    )
+                ).lower().strip(),
+            )
+
+        if unique_key in seen:
+            continue
+
+        seen.add(unique_key)
+        unique_jobs.append(job)
+
+    return unique_jobs
+
+
+# ============================================================
+# 6. Save to JSON
+# ============================================================
+
+def save_to_json(jobs):
+
+    with open(
+        JSON_PATH,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            jobs,
+            file,
+            ensure_ascii=False,
+            indent=2
+        )
+
+
+# ============================================================
+# 7. Save to SQLite
+# ============================================================
+
 def save_to_sqlite(jobs):
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source TEXT,
@@ -385,109 +619,243 @@ def save_to_sqlite(jobs):
             fetched_at TEXT,
             description TEXT
         )
-    """)
-    fetched_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        """
+    )
+
     inserted = 0
+
     for job in jobs:
+
         try:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT OR IGNORE INTO jobs
-                (source, job_title, company, city, location, employment_type,
-                 salary, skills, experience_level, apply_link, posted_at, fetched_at,
-                 description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                job.get("source"), job.get("job_title"), job.get("company"),
-                job.get("city"), job.get("location"), job.get("employment_type"),
-                job.get("salary"), job.get("skills"), job.get("experience_level"),
-                job.get("apply_link"), job.get("posted_at"), fetched_at,
-                job.get("description", "N/A"),
-            ))
+                (
+                    source,
+                    job_title,
+                    company,
+                    city,
+                    location,
+                    employment_type,
+                    salary,
+                    skills,
+                    experience_level,
+                    apply_link,
+                    posted_at,
+                    fetched_at,
+                    description
+                )
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?
+                )
+                """,
+                (
+                    job.get("source"),
+                    job.get("job_title"),
+                    job.get("company"),
+                    job.get("city"),
+                    job.get("location"),
+                    job.get(
+                        "employment_type"
+                    ),
+                    job.get("salary"),
+                    job.get("skills"),
+                    job.get(
+                        "experience_level"
+                    ),
+                    job.get("apply_link"),
+                    job.get("posted_at"),
+                    job.get("fetched_at"),
+                    job.get(
+                        "description",
+                        "N/A"
+                    ),
+                )
+            )
+
             if cur.rowcount:
                 inserted += 1
+
         except sqlite3.Error as e:
-            print(f"⚠️  DB insert error: {e}")
+            print(
+                f"⚠️ DB insert error: {e}"
+            )
+
     conn.commit()
     conn.close()
+
     return inserted
 
 
-# ==========================================
-# 5. Save results to JSON
-# ==========================================
-def save_to_json(jobs):
-    with open(JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump(jobs, f, ensure_ascii=False, indent=2)
+# ============================================================
+# 8. Inspection
+# ============================================================
 
-
-# ==========================================
-# 6. Inspection helpers (run only if you ask for them)
-# ==========================================
 def show_db_summary():
-    """Prints row counts and a sample of stored jobs. Safe to call
-    any time AFTER the jobs table has been created (i.e. after main())."""
+
     if not DB_PATH.exists():
-        print("ℹ️  No database found yet. Run main() first.")
         return
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+
     try:
-        cur.execute("SELECT COUNT(*) FROM jobs")
-        print("Total rows in DB:", cur.fetchone())
+        cur.execute(
+            "SELECT COUNT(*) FROM jobs"
+        )
 
-        cur.execute("SELECT COUNT(*), COUNT(DISTINCT apply_link) FROM jobs")
-        print("Total vs distinct apply_link:", cur.fetchone())
+        total = cur.fetchone()[0]
 
-        cur.execute("SELECT source, apply_link FROM jobs LIMIT 10")
-        for row in cur.fetchall():
-            print(row)
-    except sqlite3.OperationalError as e:
-        print(f"ℹ️  Could not read jobs table: {e}")
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT apply_link)
+            FROM jobs
+            """
+        )
+
+        distinct_links = (
+            cur.fetchone()[0]
+        )
+
+        print(
+            "\nTotal rows in DB:",
+            total
+        )
+
+        print(
+            "Distinct apply links:",
+            distinct_links
+        )
+
+    except sqlite3.Error as e:
+        print(
+            f"⚠️ Could not inspect DB: {e}"
+        )
+
     finally:
         conn.close()
 
 
-def show_json_skills():
-    """Prints job titles + extracted skills from the saved JSON file.
-    Safe to call any time AFTER save_to_json() has run."""
+def show_json_sample():
+
     if not JSON_PATH.exists():
-        print("ℹ️  No JSON results found yet. Run main() first.")
         return
-    with open(JSON_PATH, "r", encoding="utf-8") as f:
-        jobs = json.load(f)
-    for job in jobs:
-        print(f"[{job['source']}] {job['job_title']}")
-        print(f"   skills: {job['skills']}")
-        print()
+
+    with open(
+        JSON_PATH,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        jobs = json.load(file)
+
+    if not jobs:
+        return
+
+    first_job = jobs[0]
+
+    print("\n===== SAMPLE JOB =====")
+    print(
+        "Title      :",
+        first_job.get("job_title")
+    )
+    print(
+        "Posted at  :",
+        first_job.get("posted_at")
+    )
+    print(
+        "Fetched at :",
+        first_job.get("fetched_at")
+    )
+    print(
+        "Skills     :",
+        first_job.get("skills")
+    )
 
 
-# ==========================================
-# 7. Main
-# ==========================================
+# ============================================================
+# 9. Main
+# ============================================================
+
 def main():
+
+    all_jobs.clear()
+
+    print("\n" + "=" * 60)
+    print("JOB SCRAPING")
+    print("=" * 60)
+
+    # Active API
     fetch_jsearch()
-    fetch_jooble()
+
+    # Daily Jobs API intentionally disabled
+    # because of current RapidAPI plan limits.
 
     if not all_jobs:
-        print("\n❌ No results found. Check your API keys in the .env file.")
+        print(
+            "\n❌ No jobs were returned "
+            "from the API."
+        )
         return
 
-    save_to_json(all_jobs)
-    inserted = save_to_sqlite(all_jobs)
+    unique_jobs = (
+        remove_current_run_duplicates(
+            all_jobs
+        )
+    )
 
-    print("\n" + "=" * 50)
-    print(f"🎉 Saved {len(all_jobs)} jobs total.")
-    print(f"   JSON  -> {JSON_PATH}")
-    print(f"   SQLite -> {DB_PATH} ({inserted} new rows inserted)")
-    print("=" * 50)
-    print("\nSample:")
-    for job in all_jobs[:5]:
-        print(f" - [{job['source']}] {job['job_title']} @ {job['company']} ({job['city']})")
+    duplicates_removed = (
+        len(all_jobs)
+        - len(unique_jobs)
+    )
 
+    save_to_json(unique_jobs)
+
+    inserted = save_to_sqlite(
+        unique_jobs
+    )
+
+    print("\n" + "=" * 60)
+
+    print(
+        f"🎉 Collected "
+        f"{len(all_jobs)} jobs."
+    )
+
+    print(
+        f"🧹 Removed "
+        f"{duplicates_removed} duplicates."
+    )
+
+    print(
+        f"💾 Saved "
+        f"{len(unique_jobs)} unique jobs."
+    )
+
+    print(
+        f"   JSON   -> {JSON_PATH}"
+    )
+
+    print(
+        f"   SQLite -> {DB_PATH}"
+    )
+
+    print(
+        f"   New SQLite rows -> "
+        f"{inserted}"
+    )
+
+    print("=" * 60)
+
+
+# ============================================================
+# 10. Run
+# ============================================================
 
 if __name__ == "__main__":
+
     main()
 
-    # Optional: uncomment these to inspect results after a run.
     show_db_summary()
-    show_json_skills()
+    show_json_sample()
