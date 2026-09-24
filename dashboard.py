@@ -15,7 +15,7 @@ Requires a .env file (NOT .env.example) in the project root with:
 (Database/schema are hardcoded below since they're fixed: JOBS_ANALYTICS.JOBS)
 
 Run with:
-    pip install streamlit snowflake-connector-python python-dotenv pandas
+    pip install streamlit snowflake-connector-python python-dotenv pandas matplotlib
     streamlit run dashboard.py
 """
 
@@ -31,38 +31,53 @@ load_dotenv()
 st.set_page_config(page_title="Jobify Dashboard", page_icon="logo.png", layout="wide")
 
 # ============================================================
-# Look & feel — single palette used everywhere instead of
-# Streamlit's default blue on every chart
+# Look & feel — navy palette matching the Jobify logo
 # ============================================================
 
-PRIMARY = "#2F6F4E"      # deep green — bars, accents
-PRIMARY_LIGHT = "#8FBF9F"
-ACCENT = "#D98E48"       # warm amber — used sparingly (remote split, highlights)
-INK = "#1F2A24"
+PRIMARY = "#1B2A4A"      # deep navy — bars, accents, headers
+PRIMARY_LIGHT = "#5C7DAA"  # muted steel blue — metric values, secondary bars
+ACCENT = "#C99A3B"       # warm gold — used sparingly (remote split, highlights)
+INK = "#0E1626"
+CARD_BG = "rgba(27, 42, 74, 0.08)"
+CARD_BORDER = "rgba(27, 42, 74, 0.25)"
 
 st.markdown(
     f"""
     <style>
         .stMetric {{
-            background: rgba(143, 191, 159, 0.08);
-            border: 1px solid rgba(143, 191, 159, 0.25);
+            background: {CARD_BG};
+            border: 1px solid {CARD_BORDER};
             border-radius: 10px;
             padding: 12px 16px;
         }}
         [data-testid="stMetricValue"] {{
             color: {PRIMARY_LIGHT};
         }}
+        [data-testid="stMetricLabel"] {{
+            color: {INK};
+        }}
         div[data-testid="stDataFrame"] {{
-            border: 1px solid rgba(143, 191, 159, 0.25);
+            border: 1px solid {CARD_BORDER};
             border-radius: 8px;
+        }}
+        h1, h2, h3 {{
+            color: {PRIMARY};
+        }}
+        section[data-testid="stSidebar"] {{
+            border-right: 1px solid {CARD_BORDER};
         }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.logo("logo.png")
-st.title("Jobify — Live Job Market Dashboard")
+# Logo only next to the title — not pinned at the top of the sidebar/app
+title_col1, title_col2 = st.columns([1, 8], vertical_alignment="center")
+with title_col1:
+    st.image("logo.png", width=64)
+with title_col2:
+    st.title("Jobify — Live Job Market Dashboard")
+
 st.caption("Data source: Snowflake · JOBS_ANALYTICS.JOBS (live query, not a snapshot)")
 
 # ============================================================
@@ -348,7 +363,7 @@ if not skills_by_city.empty:
     top_skill_rows = pivot.sum(axis=1).sort_values(ascending=False).head(10).index
     pivot = pivot.loc[top_skill_rows]
     st.dataframe(
-        pivot.style.background_gradient(cmap="Greens", axis=None),
+        pivot.style.background_gradient(cmap="Blues", axis=None),
         use_container_width=True,
     )
 else:
