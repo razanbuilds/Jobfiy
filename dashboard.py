@@ -73,7 +73,11 @@ def run_query(sql: str) -> pd.DataFrame:
 # Header
 # ============================================================
 
-st.title("📊 Jobify — Live Job Market Dashboard")
+col1, col2 = st.columns([1, 10])
+with col1:
+    st.image("logo.png", width=60)
+with col2:
+    st.title("Jobify — Live Job Market Dashboard")
 st.caption("Data source: Snowflake · JOBS_ANALYTICS.JOBS (live query, not a snapshot)")
 
 # ============================================================
