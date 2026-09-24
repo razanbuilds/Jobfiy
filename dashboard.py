@@ -28,7 +28,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-st.set_page_config(page_title="Job Market Dashboard", layout="wide")
+st.set_page_config(page_title="Jobify Dashboard", page_icon="logo.png", layout="wide")
+st.logo("logo.png")
 
 
 # ============================================================
@@ -72,7 +73,7 @@ def run_query(sql: str) -> pd.DataFrame:
 # Header
 # ============================================================
 
-st.title("📊 Job Market Data Pipeline — Live Dashboard")
+st.title("📊 Jobify — Live Job Market Dashboard")
 st.caption("Data source: Snowflake · JOBS_ANALYTICS.JOBS (live query, not a snapshot)")
 
 # ============================================================
