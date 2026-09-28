@@ -1,12 +1,19 @@
-"""
-Job data cleaning & transformation pipeline.
 
-Reads:
-    data/jobs_results.json
-
-Writes:
-    data/jobs_cleaned.json
-"""
+# ============================================================
+# Job Data Cleaning & Transformation Pipeline
+#
+# Medallion Architecture:
+# Bronze -> Cleaning/Transformation -> Silver
+#
+# Reads:
+# /Volumes/job_data_pipeline/default/job_data/bronze/jobs_results.json
+#
+# Writes:
+# /Volumes/job_data_pipeline/default/job_data/silver/jobs_cleaned.json
+#
+# Unity Catalog:
+# job_data_pipeline.default.silver_jobs
+# ============================================================
 
 import json
 import re
@@ -25,29 +32,62 @@ try:
 except NameError:
     SCRIPT_DIR = Path.cwd()
 
+
 if SCRIPT_DIR.name == "scripts":
     BASE_DIR = SCRIPT_DIR.parent
 else:
     BASE_DIR = SCRIPT_DIR
 
-DATA_DIR = BASE_DIR / "data"
 
-RAW_PATH = DATA_DIR / "jobs_results.json"
-OUTPUT_PATH = DATA_DIR / "jobs_cleaned.json"
+# ------------------------------------------------------------
+# Databricks Medallion Volume
+# ------------------------------------------------------------
 
-print("BASE_DIR:", BASE_DIR)
-print("Input   :", RAW_PATH)
-print("Output  :", OUTPUT_PATH)
+VOLUME_ROOT = Path(
+    "/Volumes/job_data_pipeline/default/job_data"
+)
+
+BRONZE_DIR = VOLUME_ROOT / "bronze"
+SILVER_DIR = VOLUME_ROOT / "silver"
+
+RAW_PATH = (
+    BRONZE_DIR / "jobs_results.json"
+)
+
+OUTPUT_PATH = (
+    SILVER_DIR / "jobs_cleaned.json"
+)
+
+
+# ------------------------------------------------------------
+# Unity Catalog
+# ------------------------------------------------------------
+
+SILVER_TABLE = (
+    "job_data_pipeline.default.silver_jobs"
+)
+
+
+print("BASE_DIR :", BASE_DIR)
+print("🥉 Bronze:", RAW_PATH)
+print("🥈 Silver:", OUTPUT_PATH)
+print("UC Silver:", SILVER_TABLE)
+
+
+# ------------------------------------------------------------
+# Validate Bronze input
+# ------------------------------------------------------------
 
 if not RAW_PATH.exists():
+
     raise FileNotFoundError(
-        f"Input file not found: {RAW_PATH}\n"
-        "Run main.py first."
+        f"Bronze input file not found: {RAW_PATH}\n"
+        "Run main.py first so Bronze data is created."
     )
 
 
 # ============================================================
-# 2. Load raw JSON
+# 2. Load Bronze JSON
 # ============================================================
 
 with open(
@@ -55,15 +95,20 @@ with open(
     "r",
     encoding="utf-8"
 ) as f:
+
     data = json.load(f)
+
 
 df = pd.json_normalize(data)
 
-print(f"Loaded rows: {len(df)}")
+
+print(
+    f"\nLoaded Bronze rows: {len(df)}"
+)
 
 
 # ============================================================
-# 3. Validate required source columns
+# 3. Validate Required Source Columns
 # ============================================================
 
 REQUIRED_SOURCE_COLUMNS = [
@@ -82,24 +127,28 @@ REQUIRED_SOURCE_COLUMNS = [
     "description",
 ]
 
+
 missing_columns = [
     col
     for col in REQUIRED_SOURCE_COLUMNS
     if col not in df.columns
 ]
 
+
 if missing_columns:
+
     raise ValueError(
-        "Missing required columns in jobs_results.json: "
+        "Missing required columns in Bronze data: "
         + ", ".join(missing_columns)
     )
 
 
 # ============================================================
-# 4. Remove duplicate jobs
+# 4. Remove Duplicate Jobs
 # ============================================================
 
 rows_before = len(df)
+
 
 df = df.drop_duplicates(
     subset=[
@@ -110,9 +159,11 @@ df = df.drop_duplicates(
     keep="first"
 ).copy()
 
+
 duplicates_removed = (
     rows_before - len(df)
 )
+
 
 print(
     f"Duplicates removed: "
@@ -121,7 +172,7 @@ print(
 
 
 # ============================================================
-# 5. Normalize missing values
+# 5. Normalize Missing Values
 # ============================================================
 
 MISSING_TOKENS = [
@@ -132,6 +183,7 @@ MISSING_TOKENS = [
     "",
 ]
 
+
 df = df.replace(
     MISSING_TOKENS,
     pd.NA
@@ -139,7 +191,7 @@ df = df.replace(
 
 
 # ============================================================
-# 6. Clean text fields
+# 6. Clean Text Fields
 # ============================================================
 
 TEXT_COLUMNS = [
@@ -154,9 +206,14 @@ TEXT_COLUMNS = [
     "apply_link",
 ]
 
-text_column_set = set(df.columns)
+
+text_column_set = set(
+    df.columns
+)
+
 
 for col in TEXT_COLUMNS:
+
     if col in text_column_set:
 
         df[col] = (
@@ -172,10 +229,11 @@ for col in TEXT_COLUMNS:
 
 
 # ============================================================
-# 7. Standardize employment type
+# 7. Standardize Employment Type
 # ============================================================
 
 EMPLOYMENT_TYPE_MAP = {
+
     "full-time": "Full-time",
     "full time": "Full-time",
     "fulltime": "Full-time",
@@ -189,15 +247,18 @@ EMPLOYMENT_TYPE_MAP = {
     "temporary": "Temporary",
 }
 
+
 df["employment_type"] = (
     df["employment_type"]
     .str.lower()
-    .replace(EMPLOYMENT_TYPE_MAP)
+    .replace(
+        EMPLOYMENT_TYPE_MAP
+    )
 )
 
 
 # ============================================================
-# 8. Clean company
+# 8. Clean Company
 # ============================================================
 
 def clean_company(company):
@@ -205,26 +266,34 @@ def clean_company(company):
     if pd.isna(company):
         return pd.NA
 
+
     company = re.sub(
         r"\s+",
         " ",
         str(company)
     ).strip()
 
+
     if company.islower():
-        company = company.title()
+
+        company = (
+            company.title()
+        )
+
 
     return company
 
 
 df["company"] = (
     df["company"]
-    .apply(clean_company)
+    .apply(
+        clean_company
+    )
 )
 
 
 # ============================================================
-# 9. Clean description
+# 9. Clean Description
 # ============================================================
 
 def clean_description(value):
@@ -232,23 +301,25 @@ def clean_description(value):
     if pd.isna(value):
         return pd.NA
 
+
     text = html.unescape(
         str(value)
     )
 
-    # Remove HTML
+
     text = re.sub(
         r"<[^>]+>",
         " ",
         text
     )
 
-    # Remove extra whitespace
+
     text = re.sub(
         r"\s+",
         " ",
         text
     ).strip()
+
 
     return (
         text
@@ -259,12 +330,14 @@ def clean_description(value):
 
 df["description"] = (
     df["description"]
-    .apply(clean_description)
+    .apply(
+        clean_description
+    )
 )
 
 
 # ============================================================
-# 10. Clean skills
+# 10. Clean Skills
 # ============================================================
 
 def clean_skills(value):
@@ -272,36 +345,51 @@ def clean_skills(value):
     if pd.isna(value):
         return pd.NA
 
+
     skills = [
+
         skill.strip()
-        for skill in str(value).split(",")
+
+        for skill
+        in str(value).split(",")
+
         if skill.strip()
     ]
 
-    # Remove duplicates while preserving order
+
+    # Remove duplicate skills while preserving order
     skills = list(
-        dict.fromkeys(skills)
+        dict.fromkeys(
+            skills
+        )
     )
+
 
     if not skills:
         return pd.NA
 
-    return ", ".join(skills)
+
+    return ", ".join(
+        skills
+    )
 
 
 df["skills"] = (
     df["skills"]
-    .apply(clean_skills)
+    .apply(
+        clean_skills
+    )
 )
 
 
 # ============================================================
-# 11. Missing-value report
+# 11. Missing-Value Report
 # ============================================================
 
 print(
     "\n===== MISSING VALUE HANDLING ====="
 )
+
 
 for col in [
     "salary",
@@ -320,6 +408,7 @@ for col in [
         .sum()
     )
 
+
     print(
         f"{col}: "
         f"{missing_count} missing values "
@@ -331,10 +420,12 @@ for col in [
 # 12. Parse fetched_at
 # ============================================================
 
-df["fetched_at"] = pd.to_datetime(
-    df["fetched_at"],
-    errors="coerce",
-    utc=True
+df["fetched_at"] = (
+    pd.to_datetime(
+        df["fetched_at"],
+        errors="coerce",
+        utc=True
+    )
 )
 
 
@@ -342,9 +433,11 @@ df["fetched_at"] = pd.to_datetime(
 # 13. Parse posted_at
 # ============================================================
 
-ARABIC_DIGITS = str.maketrans(
-    "٠١٢٣٤٥٦٧٨٩",
-    "0123456789"
+ARABIC_DIGITS = (
+    str.maketrans(
+        "٠١٢٣٤٥٦٧٨٩",
+        "0123456789"
+    )
 )
 
 
@@ -357,16 +450,21 @@ def parse_posted_at(
         pd.isna(value)
         or pd.isna(fetched_at)
     ):
+
         return pd.NaT
+
 
     text = (
         str(value)
         .strip()
-        .translate(ARABIC_DIGITS)
+        .translate(
+            ARABIC_DIGITS
+        )
     )
 
+
     # --------------------------------------------------------
-    # Relative Arabic values
+    # Current day
     # --------------------------------------------------------
 
     if text in [
@@ -374,7 +472,13 @@ def parse_posted_at(
         "اليوم",
         "قبل قليل",
     ]:
+
         return fetched_at
+
+
+    # --------------------------------------------------------
+    # Yesterday
+    # --------------------------------------------------------
 
     if text in [
         "أمس",
@@ -382,21 +486,31 @@ def parse_posted_at(
         "قبل يوم",
         "قبل يوم واحد",
     ]:
+
         return (
             fetched_at
-            - pd.Timedelta(days=1)
+            - pd.Timedelta(
+                days=1
+            )
         )
 
+
+    # --------------------------------------------------------
+    # Two days
+    # --------------------------------------------------------
+
     if text == "قبل يومين":
+
         return (
             fetched_at
-            - pd.Timedelta(days=2)
+            - pd.Timedelta(
+                days=2
+            )
         )
+
 
     # --------------------------------------------------------
     # Minutes
-    # Example:
-    # قبل 30 دقيقة
     # --------------------------------------------------------
 
     match = re.search(
@@ -405,11 +519,13 @@ def parse_posted_at(
         text
     )
 
+
     if match:
 
         minutes = int(
             match.group(1)
         )
+
 
         return (
             fetched_at
@@ -418,11 +534,9 @@ def parse_posted_at(
             )
         )
 
+
     # --------------------------------------------------------
     # Hours
-    # Examples:
-    # قبل 23 ساعة
-    # قبل 3 ساعات
     # --------------------------------------------------------
 
     match = re.search(
@@ -431,11 +545,13 @@ def parse_posted_at(
         text
     )
 
+
     if match:
 
         hours = int(
             match.group(1)
         )
+
 
         return (
             fetched_at
@@ -444,10 +560,9 @@ def parse_posted_at(
             )
         )
 
+
     # --------------------------------------------------------
     # Days
-    # Example:
-    # قبل 3 أيام
     # --------------------------------------------------------
 
     match = re.search(
@@ -456,11 +571,13 @@ def parse_posted_at(
         text
     )
 
+
     if match:
 
         days = int(
             match.group(1)
         )
+
 
         return (
             fetched_at
@@ -468,6 +585,7 @@ def parse_posted_at(
                 days=days
             )
         )
+
 
     # --------------------------------------------------------
     # Weeks
@@ -477,19 +595,27 @@ def parse_posted_at(
         "قبل أسبوع",
         "قبل اسبوع",
     ]:
+
         return (
             fetched_at
-            - pd.Timedelta(days=7)
+            - pd.Timedelta(
+                days=7
+            )
         )
+
 
     if text in [
         "قبل أسبوعين",
         "قبل اسبوعين",
     ]:
+
         return (
             fetched_at
-            - pd.Timedelta(days=14)
+            - pd.Timedelta(
+                days=14
+            )
         )
+
 
     match = re.search(
         r"قبل\s+(\d+)\s+"
@@ -497,11 +623,13 @@ def parse_posted_at(
         text
     )
 
+
     if match:
 
         weeks = int(
             match.group(1)
         )
+
 
         return (
             fetched_at
@@ -510,40 +638,47 @@ def parse_posted_at(
             )
         )
 
+
     # --------------------------------------------------------
-    # Normal ISO / English datetime
+    # ISO / English datetime
     # --------------------------------------------------------
 
     try:
+
         return pd.to_datetime(
             text,
             errors="raise",
             utc=True
         )
 
+
     except Exception:
+
         return pd.NaT
 
 
-# THIS WAS MISSING IN THE OLD CODE
-df["posted_at"] = df.apply(
-    lambda row: parse_posted_at(
-        row["posted_at"],
-        row["fetched_at"]
-    ),
-    axis=1
+df["posted_at"] = (
+    df.apply(
+        lambda row: parse_posted_at(
+            row["posted_at"],
+            row["fetched_at"]
+        ),
+        axis=1
+    )
 )
 
-# Guarantee datetime dtype
-df["posted_at"] = pd.to_datetime(
-    df["posted_at"],
-    errors="coerce",
-    utc=True
+
+df["posted_at"] = (
+    pd.to_datetime(
+        df["posted_at"],
+        errors="coerce",
+        utc=True
+    )
 )
 
 
 # ============================================================
-# 14. Experience level
+# 14. Experience Level
 # ============================================================
 
 VALID_LEVELS = [
@@ -559,12 +694,13 @@ VALID_LEVELS = [
 ]
 
 
-# Existing API values may not match our final categories
 df["experience_level"] = (
     df["experience_level"]
     .where(
         df["experience_level"]
-        .isin(VALID_LEVELS),
+        .isin(
+            VALID_LEVELS
+        ),
         pd.NA
     )
 )
@@ -581,11 +717,13 @@ def extract_experience_level(
         else str(title).lower()
     )
 
+
     description = (
         ""
         if pd.isna(description)
         else str(description).lower()
     )
+
 
     # --------------------------------------------------------
     # Title first
@@ -595,49 +733,65 @@ def extract_experience_level(
         r"\bintern(ship)?\b",
         title
     ):
+
         return "Intern"
+
 
     if re.search(
         r"\bsenior\s+lead\b",
         title
     ):
+
         return "Senior Lead"
+
 
     if re.search(
         r"\bprincipal\b",
         title
     ):
+
         return "Principal"
+
 
     if re.search(
         r"\b(?:senior|sr\.?)\b",
         title
     ):
+
         return "Senior"
+
 
     if re.search(
         r"\b(?:lead|team lead|leader)\b",
         title
     ):
+
         return "Lead"
+
 
     if re.search(
         r"\b(?:manager|manger)\b",
         title
     ):
+
         return "Manager"
+
 
     if re.search(
         r"\bdirector\b",
         title
     ):
+
         return "Director"
+
 
     if re.search(
         r"\b(?:junior|jr\.?|entry[- ]level)\b",
         title
     ):
+
         return "Junior"
+
 
     # --------------------------------------------------------
     # Description fallback
@@ -650,6 +804,7 @@ def extract_experience_level(
         r"\b(\d+)\s*years?\s+(?:of\s+)?experience\b",
     ]
 
+
     for pattern in patterns:
 
         match = re.search(
@@ -657,19 +812,24 @@ def extract_experience_level(
             description
         )
 
+
         if match:
 
             years = int(
                 match.group(1)
             )
 
+
             if years <= 2:
                 return "Junior"
+
 
             if years <= 5:
                 return "Mid Level"
 
+
             return "Senior"
+
 
     return pd.NA
 
@@ -680,21 +840,29 @@ missing_before = (
     .sum()
 )
 
+
 mask = (
     df["experience_level"]
     .isna()
 )
 
+
 df.loc[
     mask,
     "experience_level"
-] = df.loc[mask].apply(
-    lambda row: extract_experience_level(
-        row["job_title"],
-        row["description"]
-    ),
-    axis=1
+] = (
+    df.loc[mask]
+    .apply(
+        lambda row: (
+            extract_experience_level(
+                row["job_title"],
+                row["description"]
+            )
+        ),
+        axis=1
+    )
 )
+
 
 recovered = (
     missing_before
@@ -703,6 +871,7 @@ recovered = (
     .sum()
 )
 
+
 print(
     f"Experience levels recovered: "
     f"{recovered}"
@@ -710,7 +879,7 @@ print(
 
 
 # ============================================================
-# 15. Recover city
+# 15. Recover City
 # ============================================================
 
 SAUDI_CITIES = [
@@ -741,20 +910,34 @@ def recover_city(row):
     if pd.notna(
         row["city"]
     ):
+
         return row["city"]
 
+
     values = [
-        row.get("location", ""),
-        row.get("job_title", ""),
-        row.get("description", ""),
+        row.get(
+            "location",
+            ""
+        ),
+        row.get(
+            "job_title",
+            ""
+        ),
+        row.get(
+            "description",
+            ""
+        ),
     ]
+
 
     text = " ".join(
         ""
         if pd.isna(value)
         else str(value)
+
         for value in values
     )
+
 
     for city in SAUDI_CITIES:
 
@@ -764,12 +947,15 @@ def recover_city(row):
             + r"(?!\w)"
         )
 
+
         if re.search(
             pattern,
             text,
             re.IGNORECASE
         ):
+
             return city
+
 
     return pd.NA
 
@@ -780,10 +966,14 @@ missing_before = (
     .sum()
 )
 
-df["city"] = df.apply(
-    recover_city,
-    axis=1
+
+df["city"] = (
+    df.apply(
+        recover_city,
+        axis=1
+    )
 )
+
 
 cities_recovered = (
     missing_before
@@ -792,6 +982,7 @@ cities_recovered = (
     .sum()
 )
 
+
 print(
     f"Cities recovered: "
     f"{cities_recovered}"
@@ -799,7 +990,7 @@ print(
 
 
 # ============================================================
-# 16. Derived flags
+# 16. Derived Flags
 # ============================================================
 
 remote_text = (
@@ -812,63 +1003,76 @@ remote_text = (
     .astype(str)
 ).str.lower()
 
+
 df["is_remote"] = (
     remote_text
     .str.contains(
         r"\bremote\b",
         regex=True
     )
-    .astype("boolean")
+    .astype(
+        "boolean"
+    )
 )
 
 
-# Salary has NOT been converted to numeric.
-# We only need whether salary information exists.
+# Salary itself is not required in Gold.
+# Retain whether salary information was available.
+
 df["has_salary"] = (
     df["salary"]
     .notna()
-    .astype("boolean")
+    .astype(
+        "boolean"
+    )
 )
 
 
 # ============================================================
-# 17. Date dimension fields
+# 17. Date Dimension Fields
 # ============================================================
-
-# posted_at is ALREADY a datetime.
-# Do not parse the Arabic source string again.
 
 df["posted_date"] = (
     df["posted_at"]
     .dt.date
 )
 
+
 df["posted_year"] = (
     df["posted_at"]
     .dt.year
-    .astype("Int64")
+    .astype(
+        "Int64"
+    )
 )
+
 
 df["posted_month"] = (
     df["posted_at"]
     .dt.month
-    .astype("Int64")
+    .astype(
+        "Int64"
+    )
 )
+
 
 df["posted_day"] = (
     df["posted_at"]
     .dt.day
-    .astype("Int64")
+    .astype(
+        "Int64"
+    )
 )
 
 
 # ============================================================
-# 18. Data quality checks
+# 18. Data Quality Checks
 # ============================================================
 
 print(
     "\n===== DATA QUALITY CHECKS ====="
 )
+
 
 for col in [
     "job_title",
@@ -882,12 +1086,16 @@ for col in [
         .sum()
     )
 
+
     if missing_count == 0:
+
         print(
             f"{col}: PASS"
         )
 
+
     else:
+
         print(
             f"{col}: WARNING - "
             f"{missing_count} missing values"
@@ -905,11 +1113,16 @@ duplicate_count = (
     .sum()
 )
 
+
 if duplicate_count == 0:
+
     print(
         "Duplicate jobs: PASS"
     )
+
+
 else:
+
     print(
         "Duplicate jobs: WARNING - "
         f"{duplicate_count}"
@@ -924,11 +1137,16 @@ invalid_levels = df.loc[
     "experience_level"
 ].unique()
 
+
 if len(invalid_levels) == 0:
+
     print(
         "Experience levels: PASS"
     )
+
+
 else:
+
     print(
         "Experience levels: WARNING - "
         f"{invalid_levels}"
@@ -950,33 +1168,42 @@ for col in [
         .all()
     )
 
+
     if valid:
+
         print(
             f"{col}: PASS"
         )
+
+
     else:
+
         print(
             f"{col}: WARNING"
         )
 
 
 # ============================================================
-# 19. Whitespace checks
+# 19. Whitespace Checks
 # ============================================================
 
 print(
     "\n===== WHITESPACE CHECK ====="
 )
 
+
 for col in TEXT_COLUMNS:
+
     if col not in text_column_set:
         continue
+
 
     values = (
         df[col]
         .dropna()
         .astype(str)
     )
+
 
     leading_trailing = (
         values
@@ -985,6 +1212,7 @@ for col in TEXT_COLUMNS:
         )
         .sum()
     )
+
 
     multiple_spaces = (
         values
@@ -995,15 +1223,19 @@ for col in TEXT_COLUMNS:
         .sum()
     )
 
+
     if (
         leading_trailing == 0
         and multiple_spaces == 0
     ):
+
         print(
             f"{col}: PASS"
         )
 
+
     else:
+
         print(
             f"{col}: WARNING - "
             f"{leading_trailing} "
@@ -1014,32 +1246,38 @@ for col in TEXT_COLUMNS:
 
 
 # ============================================================
-# 20. Remove raw salary field
+# 20. Remove Raw Salary Field
 # ============================================================
 
-# Star schema only needs HAS_SALARY.
+# Gold schema uses HAS_SALARY instead.
+
 df = df.drop(
-    columns=["salary"]
+    columns=[
+        "salary"
+    ]
 )
 
 
 # ============================================================
-# 21. Final report
+# 21. Final Data Quality Report
 # ============================================================
 
 print(
     "\n===== FINAL DATA QUALITY REPORT ====="
 )
 
+
 print(
     "Rows:",
     len(df)
 )
 
+
 print(
     "Columns:",
     len(df.columns)
 )
+
 
 print(
     "\nMissing values:\n",
@@ -1050,6 +1288,7 @@ print(
     )
 )
 
+
 print(
     "\nExperience level distribution:\n",
     df["experience_level"]
@@ -1057,6 +1296,7 @@ print(
         dropna=False
     )
 )
+
 
 print(
     "\nRemote jobs:\n",
@@ -1066,6 +1306,7 @@ print(
     )
 )
 
+
 print(
     "\nJobs with salary:\n",
     df["has_salary"]
@@ -1073,6 +1314,7 @@ print(
         dropna=False
     )
 )
+
 
 print(
     "\nDuplicate jobs remaining:",
@@ -1087,13 +1329,14 @@ print(
 
 
 # ============================================================
-# 22. Save cleaned JSON
+# 22. Save Cleaned Data to Silver Volume
 # ============================================================
 
-OUTPUT_PATH.parent.mkdir(
+SILVER_DIR.mkdir(
     parents=True,
     exist_ok=True
 )
+
 
 df.to_json(
     OUTPUT_PATH,
@@ -1103,19 +1346,189 @@ df.to_json(
     date_format="iso"
 )
 
+
 print(
-    f"\nSaved {len(df)} rows to "
-    f"{OUTPUT_PATH.resolve()}"
+    f"\n🥈 Silver JSON -> "
+    f"{OUTPUT_PATH}"
+)
+
+
+print(
+    f"Saved {len(df)} cleaned rows "
+    "to Silver."
 )
 
 
 # ============================================================
-# 23. Final validation
+# 23. Update Silver Unity Catalog Table
+# ============================================================
+
+def update_silver_unity_catalog():
+    """
+    Read the cleaned Silver JSON from the Databricks Volume,
+    create a Spark DataFrame, and update the Silver Delta
+    table registered in Unity Catalog.
+    """
+
+    # --------------------------------------------------------
+    # Get Spark Session
+    # --------------------------------------------------------
+
+    try:
+
+        spark_session = spark
+
+
+    except NameError:
+
+        print(
+            "ℹ️ Spark is not available. "
+            "Unity Catalog Silver update skipped."
+        )
+
+        return
+
+
+    # --------------------------------------------------------
+    # Validate Silver JSON
+    # --------------------------------------------------------
+
+    if not OUTPUT_PATH.exists():
+
+        raise FileNotFoundError(
+            "Silver JSON not found: "
+            f"{OUTPUT_PATH}"
+        )
+
+
+    print(
+        "\n" + "=" * 60
+    )
+
+
+    print(
+        "UPDATING SILVER UNITY CATALOG TABLE"
+    )
+
+
+    print(
+        "=" * 60
+    )
+
+
+    # --------------------------------------------------------
+    # Silver JSON -> Spark DataFrame
+    # --------------------------------------------------------
+
+    # jobs_cleaned.json is stored as one JSON array.
+    # Therefore multiline=true is required.
+
+    silver_df = (
+        spark_session.read
+        .option(
+            "multiline",
+            "true"
+        )
+        .json(
+            str(
+                OUTPUT_PATH
+            )
+        )
+    )
+
+
+    silver_rows = (
+        silver_df.count()
+    )
+
+
+    if silver_rows == 0:
+
+        raise ValueError(
+            "Silver DataFrame is empty. "
+            "Unity Catalog table was not updated."
+        )
+
+
+    print(
+        "Silver DataFrame rows:",
+        silver_rows
+    )
+
+
+    print(
+        "Silver DataFrame columns:",
+        silver_df.columns
+    )
+
+
+    # --------------------------------------------------------
+    # Spark DataFrame -> Unity Catalog Delta Table
+    # --------------------------------------------------------
+
+    (
+        silver_df.write
+        .format("delta")
+        .mode("overwrite")
+        .option(
+            "overwriteSchema",
+            "true"
+        )
+        .saveAsTable(
+            SILVER_TABLE
+        )
+    )
+
+
+    # --------------------------------------------------------
+    # Validate Unity Catalog Table
+    # --------------------------------------------------------
+
+    silver_table_df = (
+        spark_session.table(
+            SILVER_TABLE
+        )
+    )
+
+
+    silver_table_rows = (
+        silver_table_df.count()
+    )
+
+
+    print(
+        "✓ Unity Catalog table updated:"
+    )
+
+
+    print(
+        f"  {SILVER_TABLE}"
+    )
+
+
+    print(
+        "Silver Unity Catalog rows:",
+        silver_table_rows
+    )
+
+
+    print(
+        "=" * 60
+    )
+
+
+# Run Silver Unity Catalog update
+update_silver_unity_catalog()
+
+
+# ============================================================
+# 24. Final Validation
 # ============================================================
 
 print(
     "\n===== NULL PERCENTAGES ====="
 )
+
 
 print(
     df.isnull()
@@ -1128,6 +1541,7 @@ print(
     "\n===== FINAL COLUMNS ====="
 )
 
+
 print(
     df.columns.tolist()
 )
@@ -1137,6 +1551,7 @@ print(
     "\n===== DATA TYPES ====="
 )
 
+
 print(
     df.dtypes
 )
@@ -1145,6 +1560,7 @@ print(
 print(
     "\n===== DATE SAMPLE ====="
 )
+
 
 print(
     df[
@@ -1165,6 +1581,7 @@ print(
     "\n===== SKILLS SAMPLE ====="
 )
 
+
 print(
     df[
         [
@@ -1173,3 +1590,40 @@ print(
         ]
     ].head()
 )
+
+
+# ============================================================
+# 25. Pipeline Summary
+# ============================================================
+
+print(
+    "\n" + "=" * 60
+)
+
+
+print(
+    "🥉 BRONZE -> CLEANING -> 🥈 SILVER COMPLETE"
+)
+
+
+print(
+    f"Bronze input : {RAW_PATH}"
+)
+
+
+print(
+    f"Silver output: {OUTPUT_PATH}"
+)
+
+
+print(
+    f"Silver UC    : {SILVER_TABLE}"
+)
+
+
+print(
+    "=" * 60
+)
+
+
+
