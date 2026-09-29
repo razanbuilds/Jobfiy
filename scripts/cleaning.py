@@ -1436,6 +1436,56 @@ def update_silver_unity_catalog():
         )
     )
 
+    # --------------------------------------------------------
+    # Enforce Silver analytical data types
+    # --------------------------------------------------------
+    # JSON inference reads ISO date/time values as STRING.
+    # Explicit casts ensure the Unity Catalog Delta table uses
+    # proper TIMESTAMP and DATE types.
+
+    silver_df = (
+        silver_df
+        .withColumn(
+            "posted_at",
+            silver_df["posted_at"].cast("timestamp")
+        )
+        .withColumn(
+            "fetched_at",
+            silver_df["fetched_at"].cast("timestamp")
+        )
+        .withColumn(
+            "posted_date",
+            silver_df["posted_date"].cast("date")
+        )
+        .withColumn(
+            "posted_year",
+            silver_df["posted_year"].cast("long")
+        )
+        .withColumn(
+            "posted_month",
+            silver_df["posted_month"].cast("long")
+        )
+        .withColumn(
+            "posted_day",
+            silver_df["posted_day"].cast("long")
+        )
+        .withColumn(
+            "is_remote",
+            silver_df["is_remote"].cast("boolean")
+        )
+        .withColumn(
+            "has_salary",
+            silver_df["has_salary"].cast("boolean")
+        )
+    )
+
+
+    print(
+        "\n===== SILVER UNITY CATALOG SCHEMA ====="
+    )
+
+    silver_df.printSchema()
+
 
     silver_rows = (
         silver_df.count()
