@@ -44,7 +44,7 @@ Databricks Job
 
 The project demonstrates the complete data engineering lifecycle from **data ingestion and transformation to cloud warehousing, orchestration, and analytics**.
 
----
+Main transformations:
 
 ## 2. Requirements
 
