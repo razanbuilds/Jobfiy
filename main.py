@@ -2,11 +2,11 @@
 import os
 import re
 import json
-import sqlite3
 import time
 from pathlib import Path
 
 import requests
+import pandas as pd
 from dotenv import load_dotenv
 
 
@@ -27,8 +27,7 @@ DATA_DIR.mkdir(
 )
 
 
-# Existing repository / SQLite storage
-DB_PATH = DATA_DIR / "jobs.db"
+# Existing repository JSON storage
 
 JSON_PATH = (
     DATA_DIR / "jobs_results.json"
@@ -40,8 +39,8 @@ JSON_PATH = (
 # ============================================================
 
 BRONZE_DIR = Path(
-    "/Volumes/job_data_pipeline/default/"
-    "job_data/bronze"
+    "/Volumes/job_data_pipeline/bronze/"
+    "job_data"
 )
 
 BRONZE_JSON_PATH = (
@@ -51,7 +50,7 @@ BRONZE_JSON_PATH = (
 
 # Unity Catalog Bronze table
 BRONZE_TABLE = (
-    "job_data_pipeline.default.bronze_jobs"
+    "job_data_pipeline.bronze.jobs"
 )
 
 
@@ -813,81 +812,172 @@ def remove_current_run_duplicates(
 # ============================================================
 
 def save_to_json(jobs):
+    """
+    Merge the current API batch with existing Bronze history,
+    deduplicate by apply_link, then save the complete Bronze dataset.
+    """
 
-    # ========================================================
-    # Existing Repository JSON
-    # ========================================================
+    BRONZE_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    current_df = pd.DataFrame(jobs)
+
+    frames = []
+
+    # --------------------------------------------------------
+    # Existing Bronze history
+    # --------------------------------------------------------
+
+    if BRONZE_JSON_PATH.exists():
+
+        with open(
+            BRONZE_JSON_PATH,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            existing_data = json.load(f)
+
+        existing_df = pd.json_normalize(
+            existing_data
+        )
+
+        frames.append(existing_df)
+
+        print(
+            "Existing Bronze rows:",
+            len(existing_df)
+        )
+
+    # --------------------------------------------------------
+    # Current API batch
+    # --------------------------------------------------------
+
+    frames.append(current_df)
+
+    combined_df = pd.concat(
+        frames,
+        ignore_index=True
+    )
+
+    rows_before = len(combined_df)
+
+    # Prefer apply_link as the persistent job identity.
+    valid_link_mask = (
+        combined_df["apply_link"].notna()
+        & (
+            combined_df["apply_link"]
+            .astype(str)
+            .str.strip()
+            != ""
+        )
+    )
+
+    with_link = combined_df[
+        valid_link_mask
+    ].copy()
+
+    without_link = combined_df[
+        ~valid_link_mask
+    ].copy()
+
+    with_link = with_link.drop_duplicates(
+        subset=["apply_link"],
+        keep="last"
+    )
+
+    # Fallback for jobs with no apply_link.
+    without_link = without_link.drop_duplicates(
+        subset=[
+            "job_title",
+            "company",
+            "location"
+        ],
+        keep="last"
+    )
+
+    bronze_df = pd.concat(
+        [
+            with_link,
+            without_link
+        ],
+        ignore_index=True
+    )
+
+    duplicates_removed = (
+        rows_before - len(bronze_df)
+    )
+
+    records = (
+        bronze_df
+        .where(
+            pd.notna(bronze_df),
+            None
+        )
+        .to_dict(
+            orient="records"
+        )
+    )
+
+    # --------------------------------------------------------
+    # Repository JSON
+    # --------------------------------------------------------
 
     with open(
         JSON_PATH,
         "w",
         encoding="utf-8"
-    ) as file:
+    ) as f:
 
         json.dump(
-            jobs,
-            file,
+            records,
+            f,
             ensure_ascii=False,
-            indent=2
+            indent=2,
+            default=str
         )
 
+    # --------------------------------------------------------
+    # Databricks Bronze Volume JSON
+    # --------------------------------------------------------
 
-    # ========================================================
-    # Databricks Bronze Volume
-    # ========================================================
+    with open(
+        BRONZE_JSON_PATH,
+        "w",
+        encoding="utf-8"
+    ) as f:
 
-    try:
-
-        if Path(
-            "/Volumes"
-        ).exists():
-
-            BRONZE_DIR.mkdir(
-                parents=True,
-                exist_ok=True
-            )
-
-
-            with open(
-                BRONZE_JSON_PATH,
-                "w",
-                encoding="utf-8"
-            ) as file:
-
-                json.dump(
-                    jobs,
-                    file,
-                    ensure_ascii=False,
-                    indent=2
-                )
-
-
-            print(
-                f"🥉 Bronze JSON -> "
-                f"{BRONZE_JSON_PATH}"
-            )
-
-
-        else:
-
-            print(
-                "ℹ️ Databricks Volume "
-                "not available. "
-                "Bronze copy skipped."
-            )
-
-
-    except Exception as e:
-
-        print(
-            "⚠️ Could not save Bronze copy: "
-            f"{e}"
+        json.dump(
+            records,
+            f,
+            ensure_ascii=False,
+            indent=2,
+            default=str
         )
 
+    print(
+        "Current API rows:",
+        len(current_df)
+    )
 
-# ============================================================
-# 7. Update Bronze Unity Catalog Table
-# ============================================================
+    print(
+        "Bronze duplicates removed:",
+        duplicates_removed
+    )
+
+    print(
+        "Total Bronze history:",
+        len(bronze_df)
+    )
+
+    print(
+        "🥉 Bronze JSON ->",
+        BRONZE_JSON_PATH
+    )
+
+    return records
 
 def update_bronze_unity_catalog():
     """
@@ -1040,211 +1130,8 @@ def update_bronze_unity_catalog():
 
 
 # ============================================================
-# 8. Save to SQLite
+# 8. Inspection
 # ============================================================
-
-def save_to_sqlite(jobs):
-
-    conn = sqlite3.connect(
-        DB_PATH
-    )
-
-    cur = conn.cursor()
-
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source TEXT,
-            job_title TEXT,
-            company TEXT,
-            city TEXT,
-            location TEXT,
-            employment_type TEXT,
-            salary TEXT,
-            skills TEXT,
-            experience_level TEXT,
-            apply_link TEXT UNIQUE,
-            posted_at TEXT,
-            fetched_at TEXT,
-            description TEXT
-        )
-        """
-    )
-
-
-    inserted = 0
-
-
-    for job in jobs:
-
-        try:
-
-            cur.execute(
-                """
-                INSERT OR IGNORE INTO jobs
-                (
-                    source,
-                    job_title,
-                    company,
-                    city,
-                    location,
-                    employment_type,
-                    salary,
-                    skills,
-                    experience_level,
-                    apply_link,
-                    posted_at,
-                    fetched_at,
-                    description
-                )
-                VALUES (
-                    ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?
-                )
-                """,
-                (
-                    job.get(
-                        "source"
-                    ),
-
-                    job.get(
-                        "job_title"
-                    ),
-
-                    job.get(
-                        "company"
-                    ),
-
-                    job.get(
-                        "city"
-                    ),
-
-                    job.get(
-                        "location"
-                    ),
-
-                    job.get(
-                        "employment_type"
-                    ),
-
-                    job.get(
-                        "salary"
-                    ),
-
-                    job.get(
-                        "skills"
-                    ),
-
-                    job.get(
-                        "experience_level"
-                    ),
-
-                    job.get(
-                        "apply_link"
-                    ),
-
-                    job.get(
-                        "posted_at"
-                    ),
-
-                    job.get(
-                        "fetched_at"
-                    ),
-
-                    job.get(
-                        "description",
-                        "N/A"
-                    ),
-                )
-            )
-
-
-            if cur.rowcount:
-
-                inserted += 1
-
-
-        except sqlite3.Error as e:
-
-            print(
-                f"⚠️ DB insert error: {e}"
-            )
-
-
-    conn.commit()
-    conn.close()
-
-
-    return inserted
-
-
-# ============================================================
-# 9. Inspection
-# ============================================================
-
-def show_db_summary():
-
-    if not DB_PATH.exists():
-        return
-
-
-    conn = sqlite3.connect(
-        DB_PATH
-    )
-
-    cur = conn.cursor()
-
-
-    try:
-
-        cur.execute(
-            "SELECT COUNT(*) FROM jobs"
-        )
-
-
-        total = (
-            cur.fetchone()[0]
-        )
-
-
-        cur.execute(
-            """
-            SELECT COUNT(DISTINCT apply_link)
-            FROM jobs
-            """
-        )
-
-
-        distinct_links = (
-            cur.fetchone()[0]
-        )
-
-
-        print(
-            "\nTotal rows in DB:",
-            total
-        )
-
-
-        print(
-            "Distinct apply links:",
-            distinct_links
-        )
-
-
-    except sqlite3.Error as e:
-
-        print(
-            f"⚠️ Could not inspect DB: {e}"
-        )
-
-
-    finally:
-
-        conn.close()
-
 
 def show_json_sample():
 
@@ -1308,7 +1195,7 @@ def show_json_sample():
 
 
 # ============================================================
-# 10. Main
+# 9. Main
 # ============================================================
 
 def main():
@@ -1371,7 +1258,7 @@ def main():
     # Save Bronze JSON
     # ========================================================
 
-    save_to_json(
+    bronze_jobs = save_to_json(
         unique_jobs
     )
 
@@ -1381,17 +1268,6 @@ def main():
     # ========================================================
 
     update_bronze_unity_catalog()
-
-
-    # ========================================================
-    # Incremental SQLite Storage
-    # ========================================================
-
-    inserted = (
-        save_to_sqlite(
-            unique_jobs
-        )
-    )
 
 
     # ========================================================
@@ -1440,33 +1316,16 @@ def main():
 
 
     print(
-        f"   SQLite -> "
-        f"{DB_PATH}"
-    )
-
-
-    print(
-        f"   New SQLite rows -> "
-        f"{inserted}"
-    )
-
-
-    print(
         "=" * 60
     )
 
 
 # ============================================================
-# 11. Run
+# 10. Run
 # ============================================================
 
 if __name__ == "__main__":
 
     main()
 
-    show_db_summary()
-
     show_json_sample()
-
-
-

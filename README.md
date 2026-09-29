@@ -1,146 +1,67 @@
 # Job Data Engineering Pipeline
 
-## Overview
+## 1. Project Summary
 
-This project is an end-to-end **Data Engineering Pipeline** that collects technology job postings from the **JSearch API**, processes them in **Azure Databricks**, and loads analytics-ready data into **Snowflake**.
+This project delivers an **automated, end-to-end cloud data engineering pipeline** that transforms raw job postings into structured, analytics-ready data for job market analysis.
 
-The project follows the **Medallion Architecture**:
+Job data is ingested from the **JSearch API** and processed through a **Medallion Architecture**. Raw records are stored in the **Bronze layer** in Azure Databricks, then cleaned, standardized, deduplicated, and enriched in the **Silver layer** using Python and Pandas. The processed data is incrementally loaded into the **Gold layer in Snowflake**, where it is modeled as a **Star Schema** optimized for analytical queries.
 
-**Bronze → Silver → Gold**
+The workflow is executed as an **Azure Databricks Job** and orchestrated by **Azure Data Factory (ADF)**, enabling scheduled and repeatable pipeline runs. The resulting Snowflake data supports an interactive **Streamlit dashboard** for exploring job-market trends, companies, locations, skills, and other employment insights.
 
-**Azure Data Factory (ADF)** orchestrates and schedules the pipeline, while **Streamlit** is used for data visualization.
-
----
-
-## Architecture
+### Architecture
 
 ```text
 JSearch API
-     │
-     ▼
-main.py
-     │
-     ▼
-🥉 Bronze — Databricks
+     ↓
+🥉 Bronze — Azure Databricks
 Raw Job Data
-     │
-     ▼
-cleaning.py
-     │
-     ▼
-🥈 Silver — Databricks
-Cleaned Data
-     │
-     ▼
-load_star_schema.py
-     │
-     ▼
+     ↓
+🥈 Silver — Azure Databricks
+Cleaned & Transformed Data
+     ↓
 🥇 Gold — Snowflake
-Star Schema
-     │
-     ▼
+Analytics-Ready Star Schema
+     ↓
 Streamlit Dashboard
+
+Azure Data Factory
+        ↓
+Orchestrates & Schedules
+        ↓
+Databricks Job
 ```
 
-**ADF → Databricks Job → Bronze → Silver → Gold**
+### Key Capabilities
 
----
+- Automated API-based data ingestion
+- Medallion Architecture: **Bronze → Silver → Gold**
+- Data cleaning, transformation, enrichment, and validation
+- Incremental loading to reduce duplicate records
+- Snowflake dimensional modeling using a **Star Schema**
+- Automated execution through **Databricks Jobs**
+- Scheduling and orchestration through **Azure Data Factory**
+- Interactive analytics through **Streamlit**
 
-## Medallion Architecture
-
-### 🥉 Bronze
-
-Raw job data is collected from the **JSearch API** using `main.py`.
-
-Stored in a Databricks Volume:
-
-```text
-/Volumes/job_data_pipeline/bronze/job_data/jobs_results.json
-```
-
-### 🥈 Silver
-
-`scripts/cleaning.py` cleans and transforms the Bronze data.
+The project demonstrates the complete data engineering lifecycle from **data ingestion and transformation to cloud warehousing, orchestration, and analytics**.
 
 Main transformations:
 
-- Remove duplicates
-- Handle missing values
-- Clean locations and cities
-- Process skills
-- Extract experience levels
-- Detect remote jobs and salary availability
-- Process posting dates
+## 2. Requirements
 
-Stored in:
+### Tools and Accounts
 
-```text
-/Volumes/job_data_pipeline/silver/job_data/jobs_cleaned.json
-```
+- Python 3
+- Git
+- JSearch API account
+- Azure Databricks workspace
+- Azure Data Factory
+- Snowflake account
 
-### 🥇 Gold
+### Python Packages
 
-`scripts/load_star_schema.py` loads the Silver data into **Snowflake**.
+Install the dependencies listed in `requirements.txt`.
 
-The Gold layer uses a **Star Schema** for analytics.
-
----
-
-## Snowflake Star Schema
-
-```text
-DIM_COMPANY
-     │
-     ▼
-FACT_JOBS ─── DIM_LOCATION
-     │
-     ├─────── DIM_DATE
-     │
-     ▼
-DIM_JOB
-     │
-     ▼
-BRIDGE_JOB_SKILL
-     │
-     ▼
-DIM_SKILL
-```
-
-### Tables
-
-- `FACT_JOBS`
-- `DIM_JOB`
-- `DIM_COMPANY`
-- `DIM_LOCATION`
-- `DIM_DATE`
-- `DIM_SKILL`
-- `BRIDGE_JOB_SKILL`
-
-`BRIDGE_JOB_SKILL` handles the many-to-many relationship between jobs and skills.
-
----
-
-# How to Run the Pipeline
-
-## Step 1 — Open the Databricks Workspace
-
-Open **Azure Databricks** and navigate to the project repository:
-
-```text
-JopDataPipeline123
-```
-
----
-
-## Step 2 — Install Dependencies
-
-Make sure the required packages are installed:
-
-```bash
-pip install -r requirements.txt
-```
-
-Main dependencies include:
+Main packages include:
 
 ```text
 pandas
@@ -150,220 +71,121 @@ python-dotenv
 databricks-sdk
 ```
 
----
+### Databricks Storage
 
-## Step 3 — Configure Secrets
-
-The pipeline requires credentials for:
+The Bronze and Silver layers use Databricks Unity Catalog Volumes:
 
 ```text
-JSearch API
-Snowflake Account
-Snowflake Username
-Snowflake Password
-Snowflake Warehouse
+/Volumes/job_data_pipeline/bronze/job_data/
+/Volumes/job_data_pipeline/silver/job_data/
 ```
-
-These credentials are stored securely using **Databricks Secrets** and are not hard-coded in the repository.
 
 ---
 
-## Step 4 — Run the Complete Pipeline
+## 3. Installation
 
-The main entry point is:
+Clone the repository:
+
+```bash
+git clone <repository-url>
+cd JopDataPipeline123
+```
+
+Install the dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+The production pipeline is designed to run in **Azure Databricks**.
+
+---
+
+## 4. Run the Project
+
+Run the complete pipeline from the project directory:
 
 ```bash
 python run_pipeline.py
 ```
 
-This automatically runs:
+`run_pipeline.py` executes all stages sequentially:
 
 ```text
-1. main.py
-      ↓
-   Bronze
-
-2. cleaning.py
-      ↓
-   Silver
-
-3. load_star_schema.py
-      ↓
-   Gold
+main.py
+   ↓
+Bronze
+   ↓
+scripts/cleaning.py
+   ↓
+Silver
+   ↓
+scripts/load_star_schema.py
+   ↓
+Snowflake Gold
 ```
 
-You do **not** need to run each script separately.
+### Expected Outputs
 
----
-
-## Step 5 — Verify Bronze
-
-Check the Bronze Databricks Volume:
+**Bronze — Raw Data**
 
 ```text
-/Volumes/job_data_pipeline/bronze/job_data/
+/Volumes/job_data_pipeline/bronze/job_data/jobs_results.json
 ```
 
-Expected file:
+**Silver — Cleaned Data**
 
 ```text
-jobs_results.json
+/Volumes/job_data_pipeline/silver/job_data/jobs_cleaned.json
 ```
 
-This contains the raw collected job data.
-
----
-
-## Step 6 — Verify Silver
-
-Check:
+**Gold — Snowflake Star Schema**
 
 ```text
-/Volumes/job_data_pipeline/silver/job_data/
-```
-
-Expected file:
-
-```text
-jobs_cleaned.json
-```
-
-This contains the cleaned and transformed job data.
-
----
-
-## Step 7 — Verify Gold in Snowflake
-
-Open Snowflake:
-
-```text
-JOBS_ANALYTICS
-   └── JOBS
-```
-
-Verify the Star Schema tables:
-
-```text
-FACT_JOBS
-DIM_JOB
 DIM_COMPANY
 DIM_LOCATION
 DIM_DATE
+DIM_JOB
 DIM_SKILL
+FACT_JOBS
 BRIDGE_JOB_SKILL
 ```
 
-Example validation:
-
-```sql
-SELECT COUNT(*) FROM FACT_JOBS;
-```
+For automated execution, `run_pipeline.py` is configured as an **Azure Databricks Job**, which can be triggered and scheduled through **Azure Data Factory**.
 
 ---
 
-## Step 8 — Run Through Databricks Job
+## 5. API Keys & Environment Variables
 
-The production pipeline is configured as a **Databricks Job**.
+The project requires credentials for the JSearch API and Snowflake.
 
-The job executes:
+### JSearch
 
 ```text
-run_pipeline.py
+JSEARCH_API_KEY
 ```
 
-Run the job and verify that the execution status is:
+### Snowflake
 
 ```text
-Succeeded
+SNOWFLAKE_ACCOUNT
+SNOWFLAKE_USER
+SNOWFLAKE_PASSWORD
+SNOWFLAKE_WAREHOUSE
+SNOWFLAKE_DATABASE
+SNOWFLAKE_SCHEMA
 ```
 
----
+Sensitive credentials are managed using **Databricks Secrets** and should not be committed to GitHub.
 
-## Step 9 — Run Through ADF
-
-**Azure Data Factory** is the orchestrator.
-
-```text
-ADF Trigger
-    ↓
-Databricks Job
-    ↓
-run_pipeline.py
-    ↓
-Bronze → Silver → Gold
-```
-
-ADF can run the pipeline automatically using a scheduled trigger.
-
-Check the ADF Monitor page to verify that the pipeline run **Succeeded**.
+The configured Snowflake user must have the required permissions to access the target warehouse, database, schema, and tables.
 
 ---
 
-## Project Structure
+## 6. Known Issues
 
-```text
-JopDataPipeline123/
-│
-├── main.py
-├── run_pipeline.py
-├── requirements.txt
-│
-└── scripts/
-    ├── cleaning.py
-    └── load_star_schema.py
-```
-
-| File | Purpose |
-|---|---|
-| `main.py` | Ingestion → Bronze |
-| `cleaning.py` | Transformation → Silver |
-| `load_star_schema.py` | Loading → Gold |
-| `run_pipeline.py` | Runs the complete pipeline |
-
----
-
-## Technologies
-
-- Python
-- Pandas
-- JSearch API
-- Azure Databricks
-- Databricks Unity Catalog & Volumes
-- Azure Data Factory
-- Snowflake
-- SQL
-- Streamlit
-- GitHub
-
----
-
-## Key Features
-
-- Medallion Architecture
-- Automated API ingestion
-- Bronze and Silver Databricks storage
-- Data cleaning and validation
-- Incremental Snowflake loading
-- Star Schema
-- Databricks Job automation
-- ADF orchestration and scheduling
-- Secure Databricks Secrets
-- Streamlit analytics dashboard
-
----
-
-## Final Pipeline
-
-```text
-JSearch API
-    ↓
-🥉 Bronze
-    ↓
-🥈 Silver
-    ↓
-🥇 Gold — Snowflake
-    ↓
-Streamlit
-```
-
-**Azure Data Factory orchestrates the Databricks Job that executes the complete pipeline.**
+- Pipeline execution depends on **JSearch API availability**, response times, and API limits.
+- Source job postings may contain missing fields such as salary, city, skills, or experience level.
+- Some attributes are derived from unstructured job descriptions and therefore depend on the quality of the source data.
+- Additional job data sources could be integrated in the future to improve dataset coverage.
+- The Streamlit analytics layer can be expanded with additional metrics, filters, and visualizations.
