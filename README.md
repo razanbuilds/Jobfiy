@@ -2,183 +2,300 @@
 
 ## Overview
 
-This project is an end-to-end **Data Engineering Pipeline** designed to collect technology job postings from the **JSearch API**, clean and transform the data using Python, and load the processed data into a **Snowflake Data Warehouse**.
+This project is an end-to-end **Data Engineering Pipeline** that collects technology job postings from the **JSearch API**, processes them in **Azure Databricks**, and loads analytics-ready data into **Snowflake**.
 
-The pipeline runs on **Azure Databricks**, while **Azure Data Factory (ADF)** is used for orchestration and scheduling.
+The project follows the **Medallion Architecture**:
 
-The goal is to create an automated workflow that continuously collects new job data and stores it in an analytics-ready **Star Schema**.
+**Bronze → Silver → Gold**
+
+**Azure Data Factory (ADF)** orchestrates and schedules the pipeline, while **Streamlit** is used for data visualization.
 
 ---
 
 ## Architecture
 
 ```text
-                  Azure Data Factory
-              Orchestration & Scheduling
-                         │
-                         ▼
-                  Databricks Job
-                         │
-                         ▼
-                  run_pipeline.py
-                         │
-        ┌────────────────┼────────────────┐
-        │                │                │
-        ▼                ▼                ▼
- Data Ingestion      Cleaning &       Data Loading
-    main.py         Transformation    load_star_schema.py
-        │            cleaning.py           │
-        ▼                │                 ▼
-   JSearch API           ▼              Snowflake
-                    Cleaned Data        Star Schema
+JSearch API
+     │
+     ▼
+main.py
+     │
+     ▼
+🥉 Bronze — Databricks
+Raw Job Data
+     │
+     ▼
+cleaning.py
+     │
+     ▼
+🥈 Silver — Databricks
+Cleaned Data
+     │
+     ▼
+load_star_schema.py
+     │
+     ▼
+🥇 Gold — Snowflake
+Star Schema
+     │
+     ▼
+Streamlit Dashboard
 ```
 
-### Pipeline Flow
-
-**ADF → Databricks Job → Data Ingestion → Cleaning & Transformation → Incremental Loading → Snowflake**
+**ADF → Databricks Job → Bronze → Silver → Gold**
 
 ---
 
-## Pipeline Stages
+## Medallion Architecture
 
-### 1. Data Ingestion
+### 🥉 Bronze
 
-`main.py` is responsible for collecting technology job postings from the **JSearch API**.
+Raw job data is collected from the **JSearch API** using `main.py`.
 
-The ingestion process includes:
-
-- Fetching technology job postings
-- Normalizing API responses
-- Removing duplicate jobs
-- Adding a `fetched_at` ingestion timestamp
-- Storing the collected data for further processing
-
----
-
-### 2. Data Cleaning & Transformation
-
-`scripts/cleaning.py` cleans and prepares the collected data before loading it into the data warehouse.
-
-The transformation process includes:
-
-- Handling missing values
-- Removing duplicate records
-- Cleaning text fields
-- Processing job locations and Saudi cities
-- Processing skills
-- Identifying experience levels
-- Identifying remote jobs
-- Detecting salary availability
-- Converting relative posting times into timestamps
-- Creating date attributes such as year, month, and day
-
-The cleaned data is then prepared for loading into Snowflake.
-
----
-
-### 3. Data Loading
-
-`scripts/load_star_schema.py` loads the transformed data into **Snowflake**.
-
-The pipeline uses an **incremental loading** approach to prevent existing jobs from being repeatedly inserted.
-
-A stable `JOB_ID` is generated for each job to help identify previously loaded records.
-
----
-
-## Snowflake Data Model
-
-The data warehouse follows a **Star Schema** optimized for job market analysis.
+Stored in a Databricks Volume:
 
 ```text
-                     DIM_COMPANY
-                          │
-                          │
-DIM_LOCATION ──────── FACT_JOBS ──────── DIM_DATE
-                          │
-                          │
-                       DIM_JOB
-                          │
-                          │
-                  BRIDGE_JOB_SKILL
-                          │
-                          │
-                      DIM_SKILL
+/Volumes/job_data_pipeline/bronze/job_data/jobs_results.json
+```
+
+### 🥈 Silver
+
+`scripts/cleaning.py` cleans and transforms the Bronze data.
+
+Main transformations:
+
+- Remove duplicates
+- Handle missing values
+- Clean locations and cities
+- Process skills
+- Extract experience levels
+- Detect remote jobs and salary availability
+- Process posting dates
+
+Stored in:
+
+```text
+/Volumes/job_data_pipeline/silver/job_data/jobs_cleaned.json
+```
+
+### 🥇 Gold
+
+`scripts/load_star_schema.py` loads the Silver data into **Snowflake**.
+
+The Gold layer uses a **Star Schema** for analytics.
+
+---
+
+## Snowflake Star Schema
+
+```text
+DIM_COMPANY
+     │
+     ▼
+FACT_JOBS ─── DIM_LOCATION
+     │
+     ├─────── DIM_DATE
+     │
+     ▼
+DIM_JOB
+     │
+     ▼
+BRIDGE_JOB_SKILL
+     │
+     ▼
+DIM_SKILL
 ```
 
 ### Tables
 
-| Table | Description |
-|---|---|
-| `FACT_JOBS` | Central fact table for job postings |
-| `DIM_JOB` | Job details |
-| `DIM_COMPANY` | Company information |
-| `DIM_LOCATION` | Job location information |
-| `DIM_DATE` | Job posting date attributes |
-| `DIM_SKILL` | Skills associated with jobs |
-| `BRIDGE_JOB_SKILL` | Connects jobs and skills through a many-to-many relationship |
+- `FACT_JOBS`
+- `DIM_JOB`
+- `DIM_COMPANY`
+- `DIM_LOCATION`
+- `DIM_DATE`
+- `DIM_SKILL`
+- `BRIDGE_JOB_SKILL`
+
+`BRIDGE_JOB_SKILL` handles the many-to-many relationship between jobs and skills.
 
 ---
 
-## Databricks
+# How to Run the Pipeline
 
-**Azure Databricks** is used as the execution environment for the pipeline.
+## Step 1 — Open the Databricks Workspace
 
-The main pipeline entry point is:
+Open **Azure Databricks** and navigate to the project repository:
+
+```text
+JopDataPipeline123
+```
+
+---
+
+## Step 2 — Install Dependencies
+
+Make sure the required packages are installed:
+
+```bash
+pip install -r requirements.txt
+```
+
+Main dependencies include:
+
+```text
+pandas
+requests
+snowflake-connector-python
+python-dotenv
+databricks-sdk
+```
+
+---
+
+## Step 3 — Configure Secrets
+
+The pipeline requires credentials for:
+
+```text
+JSearch API
+Snowflake Account
+Snowflake Username
+Snowflake Password
+Snowflake Warehouse
+```
+
+These credentials are stored securely using **Databricks Secrets** and are not hard-coded in the repository.
+
+---
+
+## Step 4 — Run the Complete Pipeline
+
+The main entry point is:
 
 ```bash
 python run_pipeline.py
 ```
 
-`run_pipeline.py` executes the three pipeline stages sequentially:
+This automatically runs:
 
 ```text
-main.py
-   ↓
-cleaning.py
-   ↓
-load_star_schema.py
+1. main.py
+      ↓
+   Bronze
+
+2. cleaning.py
+      ↓
+   Silver
+
+3. load_star_schema.py
+      ↓
+   Gold
 ```
 
-The complete workflow is configured as a **Databricks Job**, allowing the pipeline to run as a managed workload.
+You do **not** need to run each script separately.
 
 ---
 
-## Azure Data Factory
+## Step 5 — Verify Bronze
 
-**Azure Data Factory (ADF)** is used as the pipeline orchestrator.
-
-ADF connects to Databricks and triggers the configured **Databricks Job**.
-
-A scheduled trigger can be configured in ADF to run the pipeline automatically at a specified time.
+Check the Bronze Databricks Volume:
 
 ```text
-ADF Schedule Trigger
-        ↓
-Databricks Job
-        ↓
+/Volumes/job_data_pipeline/bronze/job_data/
+```
+
+Expected file:
+
+```text
+jobs_results.json
+```
+
+This contains the raw collected job data.
+
+---
+
+## Step 6 — Verify Silver
+
+Check:
+
+```text
+/Volumes/job_data_pipeline/silver/job_data/
+```
+
+Expected file:
+
+```text
+jobs_cleaned.json
+```
+
+This contains the cleaned and transformed job data.
+
+---
+
+## Step 7 — Verify Gold in Snowflake
+
+Open Snowflake:
+
+```text
+JOBS_ANALYTICS
+   └── JOBS
+```
+
+Verify the Star Schema tables:
+
+```text
+FACT_JOBS
+DIM_JOB
+DIM_COMPANY
+DIM_LOCATION
+DIM_DATE
+DIM_SKILL
+BRIDGE_JOB_SKILL
+```
+
+Example validation:
+
+```sql
+SELECT COUNT(*) FROM FACT_JOBS;
+```
+
+---
+
+## Step 8 — Run Through Databricks Job
+
+The production pipeline is configured as a **Databricks Job**.
+
+The job executes:
+
+```text
 run_pipeline.py
-        ↓
-Data Ingestion
-        ↓
-Cleaning & Transformation
-        ↓
-Snowflake Load
+```
+
+Run the job and verify that the execution status is:
+
+```text
+Succeeded
 ```
 
 ---
 
-## Security
+## Step 9 — Run Through ADF
 
-Sensitive credentials are not hard-coded in the source code.
+**Azure Data Factory** is the orchestrator.
 
-**Databricks Secrets** are used to securely manage credentials such as:
+```text
+ADF Trigger
+    ↓
+Databricks Job
+    ↓
+run_pipeline.py
+    ↓
+Bronze → Silver → Gold
+```
 
-- JSearch API key
-- Snowflake username
-- Snowflake password
-- Snowflake account
-- Snowflake warehouse
+ADF can run the pipeline automatically using a scheduled trigger.
+
+Check the ADF Monitor page to verify that the pipeline run **Succeeded**.
 
 ---
 
@@ -190,74 +307,66 @@ JopDataPipeline123/
 ├── main.py
 ├── run_pipeline.py
 ├── requirements.txt
-├── README.md
 │
-├── scripts/
-│   ├── cleaning.py
-│   └── load_star_schema.py
-│
-└── data/
-    ├── jobs_results.json
-    └── jobs_cleaned.json
+└── scripts/
+    ├── cleaning.py
+    └── load_star_schema.py
 ```
+
+| File | Purpose |
+|---|---|
+| `main.py` | Ingestion → Bronze |
+| `cleaning.py` | Transformation → Silver |
+| `load_star_schema.py` | Loading → Gold |
+| `run_pipeline.py` | Runs the complete pipeline |
 
 ---
 
-## Requirements
+## Technologies
 
-The project dependencies are listed in `requirements.txt`:
-
-```txt
-pandas
-requests
-snowflake-connector-python
-python-dotenv
-databricks-sdk
-```
-
-Install them using:
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## Technologies Used
-
-- **Python** — Pipeline development
-- **Pandas** — Data cleaning and transformation
-- **JSearch API** — Job data source
-- **Azure Databricks** — Pipeline execution
-- **Azure Data Factory (ADF)** — Orchestration and scheduling
-- **Snowflake** — Cloud data warehouse
-- **SQL** — Data modeling and warehouse operations
-- **Git & GitHub** — Version control
+- Python
+- Pandas
+- JSearch API
+- Azure Databricks
+- Databricks Unity Catalog & Volumes
+- Azure Data Factory
+- Snowflake
+- SQL
+- Streamlit
+- GitHub
 
 ---
 
 ## Key Features
 
-- End-to-end data engineering pipeline
-- API-based data ingestion
-- Automated data cleaning and transformation
-- Incremental data loading
-- Snowflake cloud data warehouse
-- Star Schema dimensional modeling
-- Job-to-skill many-to-many modeling
-- Databricks Job execution
-- Azure Data Factory orchestration
-- Scheduled pipeline execution
-- Secure credential management with Databricks Secrets
-- GitHub version control
+- Medallion Architecture
+- Automated API ingestion
+- Bronze and Silver Databricks storage
+- Data cleaning and validation
+- Incremental Snowflake loading
+- Star Schema
+- Databricks Job automation
+- ADF orchestration and scheduling
+- Secure Databricks Secrets
+- Streamlit analytics dashboard
 
 ---
 
-## Summary
+## Final Pipeline
 
-This project demonstrates a complete **cloud data engineering workflow**, starting from job data ingestion and ending with analytics-ready data stored in Snowflake.
+```text
+JSearch API
+    ↓
+🥉 Bronze
+    ↓
+🥈 Silver
+    ↓
+🥇 Gold — Snowflake
+    ↓
+Streamlit
+```
 
-The final pipeline combines **JSearch API, Python, Azure Databricks, Azure Data Factory, and Snowflake** to create an automated and maintainable data processing workflow.
+**Azure Data Factory orchestrates the Databricks Job that executes the complete pipeline.**
 
 ### Final Workflow
 
