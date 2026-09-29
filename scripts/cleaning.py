@@ -1,4 +1,3 @@
-
 # ============================================================
 # Job Data Cleaning & Transformation Pipeline
 #
@@ -6,13 +5,13 @@
 # Bronze -> Cleaning/Transformation -> Silver
 #
 # Reads:
-# /Volumes/job_data_pipeline/default/job_data/bronze/jobs_results.json
+# /Volumes/job_data_pipeline/bronze/job_data/jobs_results.json
 #
 # Writes:
-# /Volumes/job_data_pipeline/default/job_data/silver/jobs_cleaned.json
+# /Volumes/job_data_pipeline/silver/job_data/jobs_cleaned.json
 #
 # Unity Catalog:
-# job_data_pipeline.default.silver_jobs
+# job_data_pipeline.silver.jobs
 # ============================================================
 
 import json
@@ -43,12 +42,13 @@ else:
 # Databricks Medallion Volume
 # ------------------------------------------------------------
 
-VOLUME_ROOT = Path(
-    "/Volumes/job_data_pipeline/default/job_data"
+BRONZE_DIR = Path(
+    "/Volumes/job_data_pipeline/bronze/job_data"
 )
 
-BRONZE_DIR = VOLUME_ROOT / "bronze"
-SILVER_DIR = VOLUME_ROOT / "silver"
+SILVER_DIR = Path(
+    "/Volumes/job_data_pipeline/silver/job_data"
+)
 
 RAW_PATH = (
     BRONZE_DIR / "jobs_results.json"
@@ -64,7 +64,7 @@ OUTPUT_PATH = (
 # ------------------------------------------------------------
 
 SILVER_TABLE = (
-    "job_data_pipeline.default.silver_jobs"
+    "job_data_pipeline.silver.jobs"
 )
 
 
@@ -1624,6 +1624,3 @@ print(
 print(
     "=" * 60
 )
-
-
-

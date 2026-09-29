@@ -1,4 +1,3 @@
-
 """
 Load cleaned Silver job data into Snowflake Star Schema.
 
@@ -7,10 +6,10 @@ Medallion Architecture:
 
 Source:
     Unity Catalog table:
-    job_data_pipeline.default.silver_jobs
+    job_data_pipeline.silver.jobs
 
 Target:
-    JOBS_ANALYTICS.JOBS
+    JOBS_ANALYTICS.GOLD
 
 Gold Tables:
     DIM_COMPANY
@@ -41,7 +40,7 @@ import snowflake.connector
 # ============================================================
 
 SILVER_TABLE = (
-    "job_data_pipeline.default.silver_jobs"
+    "job_data_pipeline.silver.jobs"
 )
 
 print(
@@ -100,7 +99,7 @@ conn = snowflake.connector.connect(
         "SNOWFLAKE_WAREHOUSE"
     ),
     database="JOBS_ANALYTICS",
-    schema="JOBS"
+    schema="GOLD"
 )
 
 
@@ -1419,13 +1418,10 @@ print(
 
 
 print(
-    "Gold target  : JOBS_ANALYTICS.JOBS"
+    "Gold target  : JOBS_ANALYTICS.GOLD"
 )
 
 
 print(
     "=" * 60
 )
-
-
-

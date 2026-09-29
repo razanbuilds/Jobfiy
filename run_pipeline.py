@@ -91,27 +91,29 @@ STAR_SCHEMA_SCRIPT = (
 # 2. Medallion Storage Paths
 # ============================================================
 
-VOLUME_ROOT = Path(
+BRONZE_VOLUME = Path(
     "/Volumes/"
     "job_data_pipeline/"
-    "default/"
+    "bronze/"
     "job_data"
 )
 
+SILVER_VOLUME = Path(
+    "/Volumes/"
+    "job_data_pipeline/"
+    "silver/"
+    "job_data"
+)
 
 BRONZE_PATH = (
-    VOLUME_ROOT
-    / "bronze"
+    BRONZE_VOLUME
     / "jobs_results.json"
 )
 
-
 SILVER_PATH = (
-    VOLUME_ROOT
-    / "silver"
+    SILVER_VOLUME
     / "jobs_cleaned.json"
 )
-
 
 # ------------------------------------------------------------
 # Unity Catalog Tables
@@ -119,48 +121,15 @@ SILVER_PATH = (
 
 BRONZE_TABLE = (
     "job_data_pipeline."
-    "default."
-    "bronze_jobs"
+    "bronze."
+    "jobs"
 )
-
 
 SILVER_TABLE = (
     "job_data_pipeline."
-    "default."
-    "silver_jobs"
+    "silver."
+    "jobs"
 )
-
-
-print(
-    "BASE_DIR:",
-    BASE_DIR
-)
-
-
-print(
-    "Bronze Volume:",
-    BRONZE_PATH
-)
-
-
-print(
-    "Bronze UC:",
-    BRONZE_TABLE
-)
-
-
-print(
-    "Silver Volume:",
-    SILVER_PATH
-)
-
-
-print(
-    "Silver UC:",
-    SILVER_TABLE
-)
-
-
 # ============================================================
 # 3. Validate Pipeline Scripts
 # ============================================================
@@ -775,7 +744,7 @@ def main():
 
 
     print(
-        "Schema:   JOBS"
+        "Schema:   GOLD"
     )
 
 
@@ -791,11 +760,11 @@ def main():
     print(
         "JSearch"
         " -> Bronze Volume"
-        " -> bronze_jobs UC"
+        " -> job_data_pipeline.bronze.jobs"
         " -> Cleaning"
         " -> Silver Volume"
-        " -> silver_jobs UC"
-        " -> Snowflake Gold"
+        " -> job_data_pipeline.silver.jobs"
+        " -> Snowflake JOBS_ANALYTICS.GOLD"
     )
 
 
@@ -806,5 +775,3 @@ def main():
 if __name__ == "__main__":
 
     main()
-
-
