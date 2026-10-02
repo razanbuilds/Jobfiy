@@ -1,13 +1,17 @@
 """
-Load cleaned job data into Snowflake Star Schema.
+Load cleaned Silver job data into Snowflake Star Schema.
+
+Medallion Architecture:
+    Bronze -> Silver -> Gold
 
 Source:
-    data/jobs_cleaned.json
+    Unity Catalog table:
+    job_data_pipeline.silver.jobs
 
 Target:
-    JOBS_ANALYTICS.JOBS
+    JOBS_ANALYTICS.GOLD
 
-Tables:
+Gold Tables:
     DIM_COMPANY
     DIM_LOCATION
     DIM_DATE
@@ -16,6 +20,7 @@ Tables:
     FACT_JOBS
     BRIDGE_JOB_SKILL
 """
+
 # /// script
 # [tool.databricks.environment]
 # dependencies = [
@@ -23,42 +28,25 @@ Tables:
 #   "databricks-sdk",
 # ]
 # ///
-import json
+
 import hashlib
-from pathlib import Path
 
 import pandas as pd
 import snowflake.connector
 
 
 # ============================================================
-# 1. Project paths
+# 1. Silver Unity Catalog Table
 # ============================================================
 
-try:
-    SCRIPT_DIR = Path(__file__).resolve().parent
-except NameError:
-    SCRIPT_DIR = Path.cwd()
-
-if SCRIPT_DIR.name == "scripts":
-    BASE_DIR = SCRIPT_DIR.parent
-else:
-    BASE_DIR = SCRIPT_DIR
-
-CLEANED_DATA_PATH = (
-    BASE_DIR
-    / "data"
-    / "jobs_cleaned.json"
+SILVER_TABLE = (
+    "job_data_pipeline.silver.jobs"
 )
 
-print("BASE_DIR :", BASE_DIR)
-print("Input    :", CLEANED_DATA_PATH)
-
-if not CLEANED_DATA_PATH.exists():
-    raise FileNotFoundError(
-        f"Cleaned data not found: {CLEANED_DATA_PATH}\n"
-        "Run cleaning.py first."
-    )
+print(
+    "🥈 Silver Unity Catalog source:",
+    SILVER_TABLE
+)
 
 
 # ============================================================
@@ -92,7 +80,10 @@ def get_secret(key):
 # 3. Connect to Snowflake
 # ============================================================
 
-print("\nConnecting to Snowflake...")
+print(
+    "\nConnecting to Snowflake..."
+)
+
 
 conn = snowflake.connector.connect(
     user=get_secret(
@@ -108,14 +99,17 @@ conn = snowflake.connector.connect(
         "SNOWFLAKE_WAREHOUSE"
     ),
     database="JOBS_ANALYTICS",
-    schema="JOBS"
+    schema="GOLD"
 )
 
+
 cursor = conn.cursor()
+
 
 print(
     "Connected to Snowflake successfully."
 )
+
 
 cursor.execute(
     """
@@ -126,37 +120,118 @@ cursor.execute(
     """
 )
 
+
 database, schema, warehouse = (
     cursor.fetchone()
 )
 
-print("Database :", database)
-print("Schema   :", schema)
-print("Warehouse:", warehouse)
+
+print(
+    "Database :",
+    database
+)
+
+print(
+    "Schema   :",
+    schema
+)
+
+print(
+    "Warehouse:",
+    warehouse
+)
 
 
 # ============================================================
-# 4. Load cleaned JSON
+# 4. Load Silver from Unity Catalog
 # ============================================================
 
-with open(
-    CLEANED_DATA_PATH,
-    "r",
-    encoding="utf-8"
-) as f:
-    data = json.load(f)
+# First try the Spark session passed by run_pipeline.py.
+# If this script runs directly in Databricks, use the
+# Databricks runtime Spark session.
 
-df = pd.json_normalize(data)
+try:
+
+    spark_session = spark
+
+except NameError:
+
+    try:
+
+        from databricks.sdk.runtime import (
+            spark as spark_session
+        )
+
+    except ImportError as exc:
+
+        raise RuntimeError(
+            "Spark is not available. "
+            "Run this script inside Databricks."
+        ) from exc
+
+
+print(
+    "\nReading Silver table from Unity Catalog:",
+    SILVER_TABLE
+)
+
+
+# ============================================================
+# Unity Catalog -> Spark DataFrame
+# ============================================================
+
+silver_spark_df = (
+    spark_session.table(
+        SILVER_TABLE
+    )
+)
+
+
+silver_rows = (
+    silver_spark_df.count()
+)
+
+
+if silver_rows == 0:
+
+    raise ValueError(
+        "Silver Unity Catalog table is empty. "
+        "Run cleaning.py first."
+    )
+
+
+print(
+    "Silver Spark DataFrame rows:",
+    silver_rows
+)
+
+
+# ============================================================
+# Spark DataFrame -> Pandas
+# ============================================================
+
+# The existing Snowflake star-schema loading logic uses
+# pandas iterrows(), so convert the Silver Spark DataFrame
+# to pandas before continuing.
+
+df = (
+    silver_spark_df
+    .toPandas()
+)
+
 
 df.columns = [
     col.upper()
     for col in df.columns
 ]
 
+
 print(
-    f"\nCleaned data loaded: "
-    f"{len(df)} rows"
+    "Silver data loaded from Unity Catalog:",
+    len(df),
+    "rows"
 )
+
 
 print(
     "Columns:",
@@ -188,15 +263,18 @@ REQUIRED_COLUMNS = [
     "POSTED_DAY",
 ]
 
+
 missing_columns = [
     col
     for col in REQUIRED_COLUMNS
     if col not in df.columns
 ]
 
+
 if missing_columns:
+
     raise ValueError(
-        "Missing columns in cleaned data: "
+        "Missing columns in Silver data: "
         + ", ".join(missing_columns)
     )
 
@@ -211,8 +289,10 @@ def to_none(value):
         return None
 
     try:
+
         if pd.isna(value):
             return None
+
     except (TypeError, ValueError):
         pass
 
@@ -229,8 +309,10 @@ def normalize_id_value(value):
         return ""
 
     try:
+
         if pd.isna(value):
             return ""
+
     except (TypeError, ValueError):
         pass
 
@@ -268,7 +350,11 @@ df["JOB_ID"] = df.apply(
     axis=1
 )
 
-print("\nJOB_ID generated.")
+
+print(
+    "\nJOB_ID generated."
+)
+
 
 print(
     df[
@@ -291,6 +377,7 @@ df["POSTED_AT"] = pd.to_datetime(
     utc=True
 )
 
+
 df["POSTED_DATE"] = pd.to_datetime(
     df["POSTED_DATE"],
     errors="coerce"
@@ -305,12 +392,14 @@ print(
     "\n===== DIM_COMPANY ====="
 )
 
+
 companies = (
     df["COMPANY"]
     .dropna()
     .astype(str)
     .str.strip()
 )
+
 
 companies = (
     companies[
@@ -319,8 +408,10 @@ companies = (
     .drop_duplicates()
 )
 
+
 company_inserted = 0
 company_skipped = 0
+
 
 for company in companies:
 
@@ -348,14 +439,18 @@ for company in companies:
         company_inserted += 1
 
     else:
+
         company_skipped += 1
 
+
 conn.commit()
+
 
 print(
     "Inserted:",
     company_inserted
 )
+
 
 print(
     "Already existed:",
@@ -371,6 +466,7 @@ print(
     "\n===== DIM_LOCATION ====="
 )
 
+
 locations = (
     df[
         [
@@ -381,8 +477,10 @@ locations = (
     .drop_duplicates()
 )
 
+
 location_inserted = 0
 location_skipped = 0
+
 
 for _, row in locations.iterrows():
 
@@ -394,7 +492,6 @@ for _, row in locations.iterrows():
         row["LOCATION"]
     )
 
-    # Skip completely empty location
     if (
         city is None
         and location is None
@@ -433,14 +530,18 @@ for _, row in locations.iterrows():
         location_inserted += 1
 
     else:
+
         location_skipped += 1
 
+
 conn.commit()
+
 
 print(
     "Inserted:",
     location_inserted
 )
+
 
 print(
     "Already existed:",
@@ -455,6 +556,7 @@ print(
 print(
     "\n===== DIM_DATE ====="
 )
+
 
 dates = (
     df[
@@ -471,11 +573,13 @@ dates = (
     .copy()
 )
 
+
 dates["DATE_KEY"] = (
     dates["POSTED_DATE"]
     .dt.strftime("%Y%m%d")
     .astype(int)
 )
+
 
 dates = (
     dates
@@ -484,8 +588,10 @@ dates = (
     )
 )
 
+
 date_inserted = 0
 date_skipped = 0
+
 
 for _, row in dates.iterrows():
 
@@ -550,14 +656,18 @@ for _, row in dates.iterrows():
         date_inserted += 1
 
     else:
+
         date_skipped += 1
 
+
 conn.commit()
+
 
 print(
     "Inserted:",
     date_inserted
 )
+
 
 print(
     "Already existed:",
@@ -572,6 +682,7 @@ print(
 print(
     "\n===== DIM_JOB ====="
 )
+
 
 jobs = (
     df[
@@ -591,8 +702,10 @@ jobs = (
     )
 )
 
+
 job_inserted = 0
 job_skipped = 0
+
 
 for _, row in jobs.iterrows():
 
@@ -616,9 +729,8 @@ for _, row in jobs.iterrows():
         row["POSTED_AT"]
     )
 
-    # Snowflake connector handles
-    # Python datetime better than pandas Timestamp
     if posted_at is not None:
+
         posted_at = (
             posted_at
             .to_pydatetime()
@@ -649,36 +761,46 @@ for _, row in jobs.iterrows():
         """,
         (
             job_id,
+
             to_none(
                 row["JOB_TITLE"]
             ),
+
             to_none(
                 row["SOURCE"]
             ),
+
             to_none(
                 row["EMPLOYMENT_TYPE"]
             ),
+
             to_none(
                 row["EXPERIENCE_LEVEL"]
             ),
+
             to_none(
                 row["APPLY_LINK"]
             ),
+
             to_none(
                 row["DESCRIPTION"]
             ),
+
             posted_at
         )
     )
 
     job_inserted += 1
 
+
 conn.commit()
+
 
 print(
     "Inserted:",
     job_inserted
 )
+
 
 print(
     "Already existed:",
@@ -696,8 +818,10 @@ def parse_skills(value):
         return []
 
     try:
+
         if pd.isna(value):
             return []
+
     except (TypeError, ValueError):
         pass
 
@@ -727,18 +851,22 @@ def parse_skills(value):
 
 unique_skills = set()
 
+
 for value in df["SKILLS"]:
 
     for skill in parse_skills(value):
 
         if skill:
+
             unique_skills.add(
                 skill
             )
 
+
 print(
     "\n===== DIM_SKILL ====="
 )
+
 
 print(
     "Unique skills:",
@@ -752,6 +880,7 @@ print(
 
 skill_inserted = 0
 skill_skipped = 0
+
 
 for skill in sorted(
     unique_skills,
@@ -782,14 +911,18 @@ for skill in sorted(
         skill_inserted += 1
 
     else:
+
         skill_skipped += 1
 
+
 conn.commit()
+
 
 print(
     "Inserted:",
     skill_inserted
 )
+
 
 print(
     "Already existed:",
@@ -805,8 +938,10 @@ print(
     "\n===== FACT_JOBS ====="
 )
 
+
 facts_inserted = 0
 facts_skipped = 0
+
 
 for _, row in df.iterrows():
 
@@ -926,6 +1061,7 @@ for _, row in df.iterrows():
         if pd.notna(
             posted_date
         ):
+
             date_key = int(
                 posted_date.strftime(
                     "%Y%m%d"
@@ -945,6 +1081,7 @@ for _, row in df.iterrows():
         else False
     )
 
+
     has_salary = (
         bool(row["HAS_SALARY"])
         if pd.notna(
@@ -955,7 +1092,7 @@ for _, row in df.iterrows():
 
 
     # --------------------------------------------------------
-    # Existing fact?
+    # Existing FACT?
     # --------------------------------------------------------
 
     cursor.execute(
@@ -969,6 +1106,7 @@ for _, row in df.iterrows():
         )
     )
 
+
     if cursor.fetchone() is not None:
 
         facts_skipped += 1
@@ -976,7 +1114,7 @@ for _, row in df.iterrows():
 
 
     # --------------------------------------------------------
-    # Insert
+    # Insert FACT
     # --------------------------------------------------------
 
     cursor.execute(
@@ -1010,12 +1148,15 @@ for _, row in df.iterrows():
 
     facts_inserted += 1
 
+
 conn.commit()
+
 
 print(
     "Inserted:",
     facts_inserted
 )
+
 
 print(
     "Already existed:",
@@ -1031,12 +1172,17 @@ print(
     "\n===== BRIDGE_JOB_SKILL ====="
 )
 
+
 bridge_inserted = 0
 bridge_skipped = 0
 
+
 for _, row in df.iterrows():
 
+    # --------------------------------------------------------
     # JOB_KEY
+    # --------------------------------------------------------
+
     cursor.execute(
         """
         SELECT JOB_KEY
@@ -1055,10 +1201,15 @@ for _, row in df.iterrows():
 
     job_key = result[0]
 
+
+    # --------------------------------------------------------
     # Skills for this job
+    # --------------------------------------------------------
+
     skills = parse_skills(
         row["SKILLS"]
     )
+
 
     for skill in skills:
 
@@ -1080,6 +1231,11 @@ for _, row in df.iterrows():
 
         skill_key = result[0]
 
+
+        # ----------------------------------------------------
+        # Existing relationship?
+        # ----------------------------------------------------
+
         cursor.execute(
             """
             SELECT 1
@@ -1093,10 +1249,16 @@ for _, row in df.iterrows():
             )
         )
 
+
         if cursor.fetchone() is not None:
 
             bridge_skipped += 1
             continue
+
+
+        # ----------------------------------------------------
+        # Insert relationship
+        # ----------------------------------------------------
 
         cursor.execute(
             """
@@ -1117,12 +1279,15 @@ for _, row in df.iterrows():
 
         bridge_inserted += 1
 
+
 conn.commit()
+
 
 print(
     "Inserted:",
     bridge_inserted
 )
+
 
 print(
     "Already existed:",
@@ -1131,12 +1296,13 @@ print(
 
 
 # ============================================================
-# 18. Final Snowflake counts
+# 18. Final Snowflake Counts
 # ============================================================
 
 print(
-    "\n===== SNOWFLAKE STAR SCHEMA ====="
+    "\n===== SNOWFLAKE GOLD STAR SCHEMA ====="
 )
+
 
 tables = [
     "DIM_COMPANY",
@@ -1147,6 +1313,7 @@ tables = [
     "FACT_JOBS",
     "BRIDGE_JOB_SKILL",
 ]
+
 
 for table in tables:
 
@@ -1164,16 +1331,97 @@ for table in tables:
 
 
 # ============================================================
-# 19. Close connection
+# 19. Load Summary
+# ============================================================
+
+print(
+    "\n===== INCREMENTAL LOAD SUMMARY ====="
+)
+
+
+print(
+    f"DIM_COMPANY       -> "
+    f"Inserted: {company_inserted}, "
+    f"Existing: {company_skipped}"
+)
+
+
+print(
+    f"DIM_LOCATION      -> "
+    f"Inserted: {location_inserted}, "
+    f"Existing: {location_skipped}"
+)
+
+
+print(
+    f"DIM_DATE          -> "
+    f"Inserted: {date_inserted}, "
+    f"Existing: {date_skipped}"
+)
+
+
+print(
+    f"DIM_JOB           -> "
+    f"Inserted: {job_inserted}, "
+    f"Existing: {job_skipped}"
+)
+
+
+print(
+    f"DIM_SKILL         -> "
+    f"Inserted: {skill_inserted}, "
+    f"Existing: {skill_skipped}"
+)
+
+
+print(
+    f"FACT_JOBS         -> "
+    f"Inserted: {facts_inserted}, "
+    f"Existing: {facts_skipped}"
+)
+
+
+print(
+    f"BRIDGE_JOB_SKILL  -> "
+    f"Inserted: {bridge_inserted}, "
+    f"Existing: {bridge_skipped}"
+)
+
+
+# ============================================================
+# 20. Close Snowflake Connection
 # ============================================================
 
 cursor.close()
 conn.close()
 
+
 print(
     "\nSnowflake connection closed."
 )
 
+
 print(
-    "\nSTAR SCHEMA LOAD COMPLETED SUCCESSFULLY"
+    "\n" + "=" * 60
+)
+
+
+print(
+    "🥈 SILVER UC -> 🥇 SNOWFLAKE GOLD "
+    "LOAD COMPLETED SUCCESSFULLY"
+)
+
+
+print(
+    f"Silver source: {SILVER_TABLE}"
+)
+
+
+print(
+    "Gold target  : JOBS_ANALYTICS.GOLD"
+)
+
+
+print(
+    "=" * 60
 )
